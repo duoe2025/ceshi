@@ -16,7 +16,7 @@
   /* ---------------- 游戏状态 ---------------- */
   const G = {
     running: false,
-    phase: 'intro',          // intro / q1 / q1done / q2 / done
+    phase: 'intro',          // intro / q1 / q1done / q2 / q3 / done
     player: { x: 0, y: 0, facing: 'down', hp: 20, maxHp: 20, atk: 5,
               moving: false, animTimer: 0, frame: 0 },
     keys: {},
@@ -24,6 +24,8 @@
     sheepCollected: 0,
     lionActive: false,
     lionDefeated: false,
+    spiritActive: false,
+    spiritDefeated: false,
     busy: false,             // 对白/战斗/菜单期间暂停世界
     battles: 0,
   };
@@ -44,6 +46,8 @@
     G.sheepCollected = 0;
     G.lionActive = false;
     G.lionDefeated = false;
+    G.spiritActive = false;
+    G.spiritDefeated = false;
     G.battles = 0;
     UI.setHp(G.player.hp, G.player.maxHp);
     updateObjective();
@@ -57,23 +61,25 @@
       case 'q1':    text = `找回走失的羊  ${G.sheepCollected}/3`; break;
       case 'q1done':text = '回去向父亲耶西复命'; break;
       case 'q2':    text = '前往东边山洞，击退猛狮'; break;
+      case 'q3':    text = '夜幕降临：用「弹琴赞美」驱走羊圈旁的邪灵'; break;
       case 'done':  text = '第一章完成！'; break;
     }
     UI.setObjective(text);
   }
 
   function questList() {
-    const order = { intro: 0, q1: 1, q1done: 1, q2: 2, done: 3 };
+    const order = { intro: 0, q1: 1, q1done: 1, q2: 2, q3: 3, done: 4 };
     const p = order[G.phase];
-    const stateOf = (idx) => (p > idx ? 'done' : p === idx ? 'active' : 'locked');
     return [
       { title: '清晨的牧场', desc: '去和父亲耶西谈谈',
-        state: G.phase === 'intro' ? 'active' : 'done' },
+        state: p > 0 ? 'done' : 'active' },
       { title: '找回走失的羊', desc: '走近走失的羊，带它们回羊圈',
-        state: G.phase === 'intro' ? 'locked' : (G.phase === 'q1' ? 'active' : (p > 1 ? 'done' : 'active')),
+        state: p < 1 ? 'locked' : (G.sheepCollected >= 3 ? 'done' : 'active'),
         progress: `${G.sheepCollected}/3` },
-      { title: '守护羊群', desc: '击退来袭的猛狮',
+      { title: '守护羊群·击退猛狮', desc: '用弹弓与杖杆击退猛狮',
         state: G.lionDefeated ? 'done' : (G.phase === 'q2' ? 'active' : 'locked') },
+      { title: '夜半驱邪·弹琴赞美', desc: '邪灵免疫物理，唯有弹琴赞美能驱散它',
+        state: G.spiritDefeated ? 'done' : (G.phase === 'q3' ? 'active' : 'locked') },
     ];
   }
 
@@ -171,6 +177,15 @@
         return;
       }
     }
+
+    // 邪灵（任务三）
+    if (G.spiritActive && !G.spiritDefeated) {
+      const sp = GameData.spirit;
+      if (dist(pc, tileCenter(sp.c, sp.r)) < 64) {
+        startSpiritBattle();
+        return;
+      }
+    }
   }
 
   function talkToJesse() {
@@ -210,10 +225,18 @@
         if (won) {
           G.lionDefeated = true;
           G.lionActive = false;
+          // 猛狮退去 → 夜幕降临 → 邪灵来袭
           UI.showDialogue(GameData.dialogue.lionDefeated, () => {
-            G.phase = 'done';
-            updateObjective();
-            finishChapter();
+            UI.showDialogue(GameData.dialogue.nightFall, () => {
+              G.phase = 'q3';
+              G.spiritActive = true;
+              // 移到羊圈附近，夜战在此展开
+              G.player.x = 9 * TILE; G.player.y = 23 * TILE;
+              G.player.facing = 'up';
+              updateObjective();
+              UI.toast('新任务：用「弹琴赞美」驱走邪灵');
+              G.busy = false;
+            });
           });
         } else {
           // 失败：原地满血复活，可再战
@@ -229,10 +252,39 @@
     });
   }
 
+  function startSpiritBattle() {
+    G.busy = true;
+    UI.showDialogue(GameData.dialogue.spiritApproach, () => {
+      G.battles++;
+      Battle.start('spirit', G.player, (won) => {
+        UI.setHp(G.player.hp, G.player.maxHp);
+        if (won) {
+          G.spiritDefeated = true;
+          G.spiritActive = false;
+          UI.showDialogue(GameData.dialogue.spiritDefeated, () => {
+            G.phase = 'done';
+            updateObjective();
+            finishChapter();
+          });
+        } else {
+          G.player.hp = G.player.maxHp;
+          UI.setHp(G.player.hp, G.player.maxHp);
+          G.player.x = 9 * TILE; G.player.y = 23 * TILE;
+          UI.showDialogue(
+            [{ name: '旁白', text: '邪灵的阴影压得大卫喘不过气……稳住心神，弹起竖琴再试一次！' }],
+            () => { G.busy = false; });
+        }
+      });
+    });
+  }
+
   function finishChapter() {
     G.running = false;
     document.getElementById('end-stats').innerHTML =
-      `找回走失的羊：3/3<br>击退猛狮所用回合战斗：${G.battles} 次<br>剩余体力：${G.player.hp}/${G.player.maxHp}`;
+      `找回走失的羊：3/3<br>` +
+      `弹弓·杖杆 击退猛狮 ✓<br>` +
+      `弹琴赞美 驱散邪灵 ✓<br>` +
+      `历经战斗：${G.battles} 场<br>剩余体力：${G.player.hp}/${G.player.maxHp}`;
     document.getElementById('end-screen').classList.remove('hidden');
   }
 
@@ -286,8 +338,22 @@
       drawNameTag('猛狮', lion.c * TILE - camX + 16, lion.r * TILE - camY - 10, '#d9534f');
     }
 
+    // 邪灵（任务三）
+    if (G.spiritActive && !G.spiritDefeated) {
+      const sp = GameData.spirit;
+      const bob = Math.sin(Date.now() / 280) * 3;
+      Sprites.spirit(ctx, sp.c * TILE - camX - 6, sp.r * TILE - camY - 10 + bob, 2.6, false);
+      drawNameTag('邪灵', sp.c * TILE - camX + 16, sp.r * TILE - camY - 12, '#9a7fd0');
+    }
+
     // 大卫
     Sprites.david(ctx, G.player.x - camX, G.player.y - camY, 2, G.player.facing, G.player.frame);
+
+    // 夜幕（任务三期间）：整屏蓝黑色叠加，营造夜战氛围
+    if (G.phase === 'q3' && !G.spiritDefeated) {
+      ctx.fillStyle = 'rgba(14,16,46,0.5)';
+      ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+    }
   }
 
   function drawFollowers(camX, camY) {
@@ -325,6 +391,9 @@
     } else if (G.lionActive && !G.lionDefeated &&
                dist(pc, tileCenter(GameData.lion.c, GameData.lion.r)) < 60) {
       target = { c: GameData.lion.c, r: GameData.lion.r };
+    } else if (G.spiritActive && !G.spiritDefeated &&
+               dist(pc, tileCenter(GameData.spirit.c, GameData.spirit.r)) < 64) {
+      target = { c: GameData.spirit.c, r: GameData.spirit.r };
     }
     if (target) {
       const x = target.c * TILE - camX + 16;

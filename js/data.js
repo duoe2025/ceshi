@@ -139,23 +139,38 @@ const GameData = {
   /* 狮子（任务二），任务一完成后出现在山洞口 */
   lion: { c: 33, r: 9, name: '猛狮' },
 
-  /* 敌人数据 */
+  /* 邪灵（任务三），击退猛狮后夜里出现在羊圈门口 */
+  spirit: { c: 9, r: 21, name: '邪灵' },
+
+  /* 敌人数据。type=beast 受物理伤害；type=spirit 几乎免疫物理，惧怕弹琴 */
   enemies: {
     lion: {
       name: '猛狮',
+      type: 'beast',
       maxHp: 30,
       atk: 6,
       sprite: 'lion',
       attackName: '利爪',
     },
+    spirit: {
+      name: '邪灵',
+      type: 'spirit',
+      maxHp: 24,
+      atk: 5,
+      sprite: 'spirit',
+      attackName: '阴影侵蚀',
+    },
   },
 
-  /* 大卫的战斗技能 */
+  /* 大卫的战斗技能
+   * dmgType: 'phys' 物理（弹弓/杖杆）——对邪灵几乎无效
+   * kind:'harp' 弹琴赞美——驱赶邪灵的关键，对野兽则起安抚作用 */
   skills: [
-    { id: 'sling',  name: '投石索', desc: '远程·准', minDmg: 6, maxDmg: 10, hit: 0.92, kind: 'attack' },
-    { id: 'staff',  name: '牧杖击', desc: '近战·稳', minDmg: 4, maxDmg: 6,  hit: 1.0,  kind: 'attack' },
-    { id: 'guard',  name: '守势',   desc: '减伤+回血', kind: 'guard', heal: 3 },
-    { id: 'pray',   name: '祷告',   desc: '回复体力', kind: 'heal', heal: 7 },
+    { id: 'sling', name: '投石索', desc: '弹弓·远程主力', kind: 'attack', dmgType: 'phys', minDmg: 6, maxDmg: 10, hit: 0.92 },
+    { id: 'staff', name: '杖与杆', desc: '近战·护羊',   kind: 'attack', dmgType: 'phys', minDmg: 4, maxDmg: 7,  hit: 1.0 },
+    { id: 'harp',  name: '弹琴赞美', desc: '驱邪·安抚',  kind: 'harp',   minDmg: 9, maxDmg: 13, hit: 1.0 },
+    { id: 'guard', name: '守势',   desc: '减伤+回血',    kind: 'guard', heal: 3 },
+    { id: 'pray',  name: '祷告',   desc: '回复体力',      kind: 'heal',  heal: 7 },
   ],
 
   /* 对白脚本 */
@@ -190,7 +205,25 @@ const GameData = {
     ],
     lionDefeated: [
       { name: '旁白', text: '猛狮败下阵来，夹着尾巴逃回了山里。羊群安然无恙。' },
-      { name: '大卫', text: '羊群安全了。父亲会为此高兴的。' },
+      { name: '大卫', text: '羊群安全了……可是天怎么忽然暗了下来？' },
+    ],
+    nightFall: [
+      { name: '旁白', text: '夜幕骤然笼罩牧场。羊圈旁聚起一团黑影，羊群惊惧地挤作一团。' },
+      { name: '旁白', text: '一只邪灵从黑暗中浮现，弹弓与木杖都伤不到它分毫。' },
+      { name: '大卫', text: '这等阴邪之物……投石索与杖都奈何不了它。' },
+      { name: '大卫', text: '我要弹起竖琴，向耶和华歌唱赞美——黑暗必要退去!' },
+    ],
+    spiritApproach: [
+      { name: '邪灵', text: '（邪灵盘旋着逼近羊圈，吐出阴冷的气息。）' },
+      { name: '大卫', text: '（大卫取下竖琴。）用赞美驱散你!' },
+    ],
+    spiritPhysFail: [
+      { name: '旁白', text: '提示：邪灵虚无缥缈，弹弓和杖几乎无法伤到它。试试「弹琴赞美」。' },
+    ],
+    spiritDefeated: [
+      { name: '旁白', text: '琴声与赞美如光涌出，邪灵发出尖啸，化作黑烟消散。' },
+      { name: '旁白', text: '夜色退去，晨光重新照亮牧场，羊群安然无恙。' },
+      { name: '大卫', text: '靠着耶和华，狮子与邪灵都不能伤害他的羊群。' },
     ],
   },
 };

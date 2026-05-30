@@ -27,7 +27,7 @@ const Battle = (() => {
 
   function start(enemyKey, player, cb) {
     const def = GameData.enemies[enemyKey];
-    S.enemy = { key: enemyKey, name: def.name, hp: def.maxHp, maxHp: def.maxHp,
+    S.enemy = { key: enemyKey, name: def.name, type: def.type, hp: def.maxHp, maxHp: def.maxHp,
                 atk: def.atk, attackName: def.attackName, sprite: def.sprite };
     S.player = player;
     S.skills = GameData.skills;
@@ -37,12 +37,13 @@ const Battle = (() => {
     S.over = false;
     S.active = true;
     S.cb = cb;
+    S.hintShown = false;
     S.hurtEnemy = S.hurtPlayer = S.shake = 0;
 
     if (!ctx) ctx = el('battle-canvas').getContext('2d');
     el('battle').classList.remove('hidden');
     el('battle-log').innerHTML = '';
-    log(`一头${S.enemy.name}挡住了去路！`);
+    log(`${S.enemy.name}挡住了去路！`);
     buildMenu();
     draw();
   }
@@ -94,13 +95,31 @@ const Battle = (() => {
     refreshMenu();
 
     if (sk.kind === 'attack') {
-      if (Math.random() <= sk.hit) {
+      // 物理攻击（弹弓 / 杖杆）：对邪灵几乎无效
+      if (Math.random() > sk.hit) {
+        log(`大卫使用「${sk.name}」，可惜没有命中……`);
+      } else if (S.enemy.type === 'spirit') {
+        S.enemy.hp = Math.max(0, S.enemy.hp - 1);
+        S.hurtEnemy = 10;
+        log(`大卫使用「${sk.name}」，但邪灵虚无缥缈，物理攻击几乎无效（仅 1 点）！`);
+        if (!S.hintShown) { log('试试「弹琴赞美」——赞美之声才能驱散邪灵。'); S.hintShown = true; }
+      } else {
         const dmg = rand(sk.minDmg, sk.maxDmg);
         S.enemy.hp = Math.max(0, S.enemy.hp - dmg);
         S.hurtEnemy = 18; S.shake = 8;
         log(`大卫使用「${sk.name}」，命中！造成 ${dmg} 点伤害。`);
+      }
+    } else if (sk.kind === 'harp') {
+      if (S.enemy.type === 'spirit') {
+        const dmg = rand(sk.minDmg, sk.maxDmg);
+        S.enemy.hp = Math.max(0, S.enemy.hp - dmg);
+        S.hurtEnemy = 18; S.shake = 8;
+        log(`大卫弹起竖琴向神歌唱赞美，圣洁的琴声灼伤邪灵，造成 ${dmg} 点伤害！`);
       } else {
-        log(`大卫使用「${sk.name}」，可惜没有命中……`);
+        // 对野兽：安抚，降低其攻击并稍作鼓舞
+        S.enemy.atk = Math.max(2, S.enemy.atk - 2);
+        heal(2);
+        log(`大卫弹琴安抚，${S.enemy.name}气势稍减（攻击力下降），自己也镇定了些（+2）。`);
       }
     } else if (sk.kind === 'guard') {
       S.guard = true;
@@ -161,14 +180,26 @@ const Battle = (() => {
   function draw() {
     if (!S.active) return;
     const W = 800, H = 380;
-    // 背景：天空 + 草地
+    const night = S.enemy.type === 'spirit';
+    // 背景：白天草地 / 夜晚牧场
     const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, '#bcd9e8'); sky.addColorStop(0.55, '#cfe6c9'); sky.addColorStop(1, '#7aa85c');
+    if (night) {
+      sky.addColorStop(0, '#171430'); sky.addColorStop(0.55, '#23204a'); sky.addColorStop(1, '#2c3a30');
+    } else {
+      sky.addColorStop(0, '#bcd9e8'); sky.addColorStop(0.55, '#cfe6c9'); sky.addColorStop(1, '#7aa85c');
+    }
     ctx.fillStyle = sky; ctx.fillRect(0, 0, W, H);
-    ctx.fillStyle = '#6a9a4f'; ctx.fillRect(0, 250, W, H - 250);
-    // 远处山洞剪影
-    ctx.fillStyle = '#5a6b4a';
-    ctx.beginPath(); ctx.moveTo(600, 250); ctx.lineTo(680, 150); ctx.lineTo(760, 250); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = night ? '#2f4030' : '#6a9a4f'; ctx.fillRect(0, 250, W, H - 250);
+    if (night) {
+      // 月亮与星星
+      ctx.fillStyle = '#e9e6c8'; ctx.beginPath(); ctx.arc(120, 70, 26, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff';
+      [[300,50],[420,90],[520,40],[640,80],[700,140]].forEach(([sx, sy]) => ctx.fillRect(sx, sy, 2, 2));
+    } else {
+      // 远处山洞剪影
+      ctx.fillStyle = '#5a6b4a';
+      ctx.beginPath(); ctx.moveTo(600, 250); ctx.lineTo(680, 150); ctx.lineTo(760, 250); ctx.closePath(); ctx.fill();
+    }
 
     const sh = () => (S.shake > 0 ? (Math.random() * 2 - 1) * S.shake : 0);
 
@@ -177,10 +208,14 @@ const Battle = (() => {
     const dy = 150 + (S.hurtPlayer > 0 ? sh() : 0);
     Sprites.david(ctx, dx, dy, 11, 'right', 0);
 
-    // 猛狮（右）
+    // 敌人（右）：根据 sprite 选择绘制
     const lx = 470 + (S.hurtEnemy > 0 ? sh() : 0);
     const ly = 120 + (S.hurtEnemy > 0 ? sh() : 0);
-    Sprites.lion(ctx, lx, ly, 14, S.hurtEnemy > 0);
+    if (S.enemy.sprite === 'spirit') {
+      Sprites.spirit(ctx, lx + 10, ly - 10, 14, S.hurtEnemy > 0);
+    } else {
+      Sprites.lion(ctx, lx, ly, 14, S.hurtEnemy > 0);
+    }
 
     // 血条
     drawHpBar(60, 40, '大卫', S.player.hp, S.player.maxHp, '#4fae4f');

@@ -164,5 +164,24 @@ const Sprites = (() => {
     b(4, 7, 1, 1, '#fff'); b(7, 7, 1, 1, '#fff'); // 獠牙
   }
 
-  return { tile, david, jesse, sheep, lion };
+  // 邪灵：漂浮的黑色斗篷，发光的双眼
+  function spirit(ctx, x, y, scale, hurt) {
+    const b = (c, r, w, h, col) => blk(ctx, x, y, scale, c, r, w, h, col);
+    const robe = hurt ? '#5a4a7a' : '#2e2540';
+    const robe2 = hurt ? '#7a6aa0' : '#403458';
+    const eye = hurt ? '#fff2a0' : '#8be0ff';
+    // 兜帽与躯体
+    b(5, 1, 6, 3, robe2);
+    b(4, 3, 8, 7, robe);
+    b(3, 5, 1, 4, robe); b(12, 5, 1, 4, robe);
+    // 飘散的下摆
+    b(4, 10, 2, 2, robe2); b(7, 11, 2, 2, robe); b(10, 10, 2, 2, robe2);
+    b(5, 12, 1, 1, robe); b(9, 12, 1, 1, robe);
+    // 发光双眼
+    b(6, 4, 1, 2, eye); b(9, 4, 1, 2, eye);
+    // 缭绕黑气
+    b(2, 2, 1, 1, robe2); b(13, 3, 1, 1, robe2); b(3, 9, 1, 1, robe2);
+  }
+
+  return { tile, david, jesse, sheep, lion, spirit };
 })();
