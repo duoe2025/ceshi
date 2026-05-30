@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "lib": ["ES2019", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": "..",
+    "paths": {
+      "phaser": ["tools/node_modules/phaser/types/phaser"]
+    }
+  },
+  "include": [
+    "../assets/scripts/phaser/**/*.ts",
+    "../assets/scripts/engine/**/*.ts",
+    "../assets/scripts/canvas/**/*.ts",
+    "../assets/scripts/IPainter.ts",
+    "../assets/scripts/Sprites.ts",
+    "../assets/scripts/core/**/*.ts"
+  ]
+}

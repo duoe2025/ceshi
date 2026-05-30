@@ -9,6 +9,18 @@
 
 ---
 
+## HTML5 网页版（Phaser 3）
+
+本仓库正按《[开发计划](./docs/开发计划.md)》第三部分推进「大卫一生」HTML5 ARPG：
+**逻辑核心保持引擎无关（已 39/39 无头单测），表现层迁移到 Phaser 3**。
+
+- 一键构建：`cd tools && npm install && npm run build:phaser` → 产出 `html5/game.js`
+- 本地试玩：用浏览器打开 `html5/index.html`（或 `python3 -m http.server` 后访问）
+- 入口与场景：`assets/scripts/phaser/`（`main.ts` 创建 `Phaser.Game`，`GameScene` 承载第一章）
+- 模块化引擎入口：`assets/scripts/engine/`（StatsEngine/LootEngine/MapEngine… 见开发计划 §12）
+
+> Phaser 场景复用同一套引擎无关逻辑核心；第一章作为模板，后续每一幕/每张地图按此扩展。
+
 ## 工程架构：引擎无关核心 + 薄渲染层
 
 为了方便复用与测试，逻辑与渲染完全分离：

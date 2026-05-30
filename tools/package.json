@@ -7,11 +7,14 @@
     "test": "tsc -p tsconfig.json && node out/tools/coretest.js",
     "typecheck:engine": "tsc -p tsconfig.engine.json",
     "typecheck:canvas": "tsc -p tsconfig.canvas.json",
-    "build:canvas": "node build-canvas.mjs"
+    "typecheck:phaser": "tsc -p tsconfig.phaser.json",
+    "build:canvas": "node build-canvas.mjs",
+    "build:phaser": "node build-phaser.mjs"
   },
   "devDependencies": {
-    "typescript": "5.4.5",
     "@types/node": "20.11.30",
-    "esbuild": "0.20.2"
+    "esbuild": "0.20.2",
+    "phaser": "^3.80.1",
+    "typescript": "5.4.5"
   }
 }
