@@ -176,6 +176,7 @@ export class CanvasGame implements IGameView {
 
     this.drawChests(camX, camY);
     this.drawGroundItems(camX, camY);
+    this.drawMouseMarkers(camX, camY);
 
     G.projectiles.forEach((pr) => this.drawProjectile(pr, camX, camY));
 
@@ -219,6 +220,46 @@ export class CanvasGame implements IGameView {
       const fx = G.player.x - camX + (i - 1) * 10;
       const fy = G.player.y - camY + 18 + i * 4;
       if (G.phase === 'q1' || G.phase === 'q1done') Sprites.sheep(this.painter, fx, fy, 1.4);
+    }
+  }
+
+  /** 暗黑式鼠标反馈：落点光标 + 锁定目标光环 + 悬停高亮（仅鼠标端）。 */
+  private drawMouseMarkers(camX: number, camY: number): void {
+    if (this.touchUI || this.finished) return;
+    const G = this.core;
+    const p = this.painter;
+    const t = this.animClock;
+
+    // 1) 地面落点光标：奔跑目标点（无锁定怪时）
+    if (G.moveTarget && !G.attackTarget) {
+      const mx = G.moveTarget.x - camX;
+      const my = G.moveTarget.y - camY;
+      const pulse = (Math.sin(t * 6) + 1) * 0.5; // 0..1
+      const r = 9 + pulse * 4;
+      p.strokeCircle(mx, my, r, 2, rgba(120, 230, 140, 200));
+      p.strokeCircle(mx, my, 3, 2, rgba(200, 255, 210, 230));
+      p.fillRect(mx - 7, my - 1, 14, 2, rgba(150, 240, 170, 150));
+      p.fillRect(mx - 1, my - 7, 2, 14, rgba(150, 240, 170, 150));
+    }
+
+    // 2) 锁定目标光环：被点击追击/攻击的怪脚下
+    const tgt = G.attackTarget;
+    if (tgt && !tgt.dead) {
+      const cx = tgt.x + TILE / 2 - camX;
+      const cy = tgt.y + TILE / 2 - camY;
+      const pulse = (Math.sin(t * 7) + 1) * 0.5;
+      const r = TILE * (tgt.scale || 2) * 0.5 + 4 + pulse * 3;
+      p.strokeCircle(cx, cy, r, 2, rgba(240, 90, 90, 220));
+      p.strokeCircle(cx, cy, r + 4, 1, rgba(240, 90, 90, 90));
+    }
+
+    // 3) 悬停高亮：光标当前指向的怪（非已锁定的）
+    const hover = G.enemyAtCursor();
+    if (hover && !hover.dead && hover !== tgt) {
+      const cx = hover.x + TILE / 2 - camX;
+      const cy = hover.y + TILE / 2 - camY;
+      const r = TILE * (hover.scale || 2) * 0.5 + 4;
+      p.strokeCircle(cx, cy, r, 2, rgba(255, 220, 110, 200));
     }
   }
 
@@ -307,9 +348,15 @@ export class CanvasGame implements IGameView {
         p.strokeCircle(x, y, rr * 0.6, 2, rgba(255, 246, 207, a));
       } else if (fx.kind === 'hit') {
         const a = Math.round(255 * t);
-        for (let i = 0; i < 4; i++) {
-          const ang = i * Math.PI / 2 + (1 - t);
-          p.fillRect(x + Math.cos(ang) * 8 - 1, y + Math.sin(ang) * 8 - 1, 3, 3, rgba(255, 242, 192, a));
+        const prog = 1 - t;
+        // 迸溅闪光 + 外扩白环
+        p.fillCircle(x, y, 4 * t + 1, rgba(255, 250, 220, a));
+        p.strokeCircle(x, y, 4 + prog * 9, 2, rgba(255, 232, 170, Math.round(a * 0.8)));
+        // 六向飞溅火星
+        for (let i = 0; i < 6; i++) {
+          const ang = i * Math.PI / 3 + prog;
+          const d = 5 + prog * 9;
+          p.fillRect(x + Math.cos(ang) * d - 1, y + Math.sin(ang) * d - 1, 3, 3, rgba(255, 242, 192, a));
         }
       } else if (fx.kind === 'drawback') {
         // 弹弓蓄力：朝向后方被拉出的石子 + V 形皮带
@@ -624,5 +671,33 @@ export class CanvasGame implements IGameView {
       c.setMove('up', false); c.setMove('down', false);
     }
     if (id === this.atkId) { this.atkId = -1; c.setAttack(false); }
+  }
+
+  /* ---------------- 输入：鼠标（暗黑式，桌面端） ---------------- */
+  /** 屏幕坐标 → 世界坐标（按当前相机，不含抖动）。 */
+  private screenToWorld(sx: number, sy: number): { x: number; y: number } {
+    const { camX, camY } = this.camera(0);
+    return { x: sx + camX, y: sy + camY };
+  }
+
+  /** 鼠标移动：转发为核心瞄准点。 */
+  mouseMove(sx: number, sy: number): void {
+    const w = this.screenToWorld(sx, sy);
+    this.core.mouseAim(w.x, w.y);
+  }
+
+  /** 鼠标左键按下：先处理结算/对白，否则换算到世界并交给核心（点地跑/点怪打）。 */
+  mouseDownLeft(sx: number, sy: number): void {
+    const c = this.core;
+    if (this.finished) { this.start(); return; }
+    if (c.dialogueActive()) { c.advanceDialogue(); return; }
+    if (c.equipPanelOpen || c.questLogOpen) return;
+    const w = this.screenToWorld(sx, sy);
+    c.mouseDown(w.x, w.y);
+  }
+
+  /** 鼠标左键松开。 */
+  mouseUpLeft(): void {
+    this.core.mouseUp();
   }
 }

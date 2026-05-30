@@ -8,8 +8,7 @@ import Phaser from 'phaser';
 import { VIEW_W, VIEW_H } from '../canvas/CanvasGame';
 import { GameScene } from './GameScene';
 
-// eslint-disable-next-line no-new
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   width: VIEW_W,
   height: VIEW_H,
@@ -22,3 +21,5 @@ new Phaser.Game({
   },
   scene: [GameScene],
 });
+// 调试钩子：浏览器控制台可访问 __DAVID.game / 当前场景
+(window as unknown as { __DAVID: Phaser.Game }).__DAVID = game;

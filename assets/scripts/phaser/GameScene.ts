@@ -42,15 +42,25 @@ export class GameScene extends Phaser.Scene {
       kb.on('keydown', (e: KeyboardEvent) => this.game1.keyDown(e.key));
       kb.on('keyup', (e: KeyboardEvent) => this.game1.keyUp(e.key));
     }
-    // 指针 / 触摸（移动端自动出现虚拟摇杆）
+    // 禁用右键菜单，便于后续右键操作；鼠标=暗黑式操作，触摸=虚拟摇杆
+    this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (p.wasTouch) this.game1.setTouchControls(true);
-      this.game1.pointerDown(p.id, p.x, p.y);
+      if (p.wasTouch) {
+        this.game1.setTouchControls(true);
+        this.game1.pointerDown(p.id, p.x, p.y);
+      } else if (p.button === 0) {
+        // p.button 是触发本次事件的按键（0=左键），不要用 leftButtonDown()（读的是按键状态位图）
+        this.game1.mouseDownLeft(p.x, p.y);
+      }
     });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => {
-      this.game1.pointerMove(p.id, p.x, p.y);
+      if (p.wasTouch) this.game1.pointerMove(p.id, p.x, p.y);
+      else this.game1.mouseMove(p.x, p.y);
     });
-    this.input.on('pointerup', (p: Phaser.Input.Pointer) => this.game1.pointerUp(p.id));
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      if (p.wasTouch) this.game1.pointerUp(p.id);
+      else if (p.button === 0) this.game1.mouseUpLeft(); // 仅左键释放才结束「按住跟随」
+    });
   }
 
   update(): void {
