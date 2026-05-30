@@ -1,0 +1,20 @@
+{
+  "name": "david-chapter1-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "沙盒里对引擎无关核心逻辑做无头验证的工具（无需 Cocos 编辑器）",
+  "scripts": {
+    "test": "tsc -p tsconfig.json && node out/tools/coretest.js",
+    "typecheck:engine": "tsc -p tsconfig.engine.json",
+    "typecheck:canvas": "tsc -p tsconfig.canvas.json",
+    "typecheck:phaser": "tsc -p tsconfig.phaser.json",
+    "build:canvas": "node build-canvas.mjs",
+    "build:phaser": "node build-phaser.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.30",
+    "esbuild": "0.20.2",
+    "phaser": "^3.80.1",
+    "typescript": "5.4.5"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "david-chapter1",
+  "uuid": "9e052988-7515-4883-96cf-872d05e1d143",
+  "version": "1.0.0",
+  "description": "牧童大卫 · 第一章 Demo（Cocos Creator 3.8 LTS，可发布微信小游戏）",
+  "creator": {
+    "version": "3.8.6"
+  },
+  "type": "game"
+}

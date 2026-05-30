@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2019",
+    "module": "ESNext",
+    "moduleResolution": "Node",
+    "strict": true,
+    "noEmit": true,
+    "experimentalDecorators": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": [
+    "./cc.d.ts",
+    "../assets/scripts/**/*.ts"
+  ],
+  "exclude": [
+    "../assets/scripts/phaser/**/*.ts"
+  ]
+}

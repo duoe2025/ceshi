@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <title>牧童大卫 · 第一章（Canvas 版）</title>
+  <style>
+    html, body { margin: 0; height: 100%; background: #14161c; overflow: hidden; }
+    body { display: flex; flex-direction: column; align-items: center; justify-content: center;
+           font-family: sans-serif; color: #cfc6b8; }
+    #game { background: #14161c; image-rendering: pixelated; touch-action: none;
+            max-width: 100vw; max-height: 88vh; box-shadow: 0 0 24px #0008; }
+    #tip { margin-top: 8px; font-size: 13px; color: #8a8576; }
+  </style>
+</head>
+<body>
+  <canvas id="game" width="800" height="576"></canvas>
+  <div id="tip">方向键/WASD 移动 · J/空格 攻击 · 1/2/3 切换弹弓/杖杆/弹琴 · Q 任务日志 · 手机端点按屏幕出现虚拟摇杆</div>
+  <script src="./game.js"></script>
+</body>
+</html>
