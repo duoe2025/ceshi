@@ -48,7 +48,8 @@ export class GameScene extends Phaser.Scene {
       if (p.wasTouch) {
         this.game1.setTouchControls(true);
         this.game1.pointerDown(p.id, p.x, p.y);
-      } else if (p.leftButtonDown()) {
+      } else if (p.button === 0) {
+        // p.button 是触发本次事件的按键（0=左键），不要用 leftButtonDown()（读的是按键状态位图）
         this.game1.mouseDownLeft(p.x, p.y);
       }
     });
@@ -58,7 +59,7 @@ export class GameScene extends Phaser.Scene {
     });
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
       if (p.wasTouch) this.game1.pointerUp(p.id);
-      else this.game1.mouseUpLeft();
+      else if (p.button === 0) this.game1.mouseUpLeft(); // 仅左键释放才结束「按住跟随」
     });
   }
 

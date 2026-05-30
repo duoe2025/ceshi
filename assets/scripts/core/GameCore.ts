@@ -460,6 +460,7 @@ export class GameCore {
       lootChance: def.lootChance == null ? 0 : def.lootChance,
       lootTier: def.lootTier || 'common',
       ambient, scale: ambient ? 1.8 : (def.sprite === 'spirit' ? 2.6 : 3),
+      vx: 0, vy: 0,
     };
   }
 
@@ -664,6 +665,9 @@ export class GameCore {
   private playerDown(): void {
     this.busy = true;
     this.projectiles = [];
+    this.moveTarget = null;
+    this.attackTarget = null;
+    this.mouseHeld = false;
     this.player.hp = this.player.maxHp;
     const e = this.enemy;
     if (e) {
@@ -677,9 +681,13 @@ export class GameCore {
     if (this.phase === 'q3') {
       this.player.x = 9 * TILE; this.player.y = 23 * TILE; this.player.facing = 'up';
       line = [{ name: '旁白', text: '邪灵的阴影压得大卫几乎窒息……稳住心神，再弹起竖琴!' }];
-    } else {
+    } else if (this.phase === 'q2') {
       this.player.x = 26 * TILE; this.player.y = 22 * TILE; this.player.facing = 'right';
       line = [{ name: '旁白', text: '大卫被猛狮扑退……他退到路上，深吸一口气，握紧投石索再来一次!' }];
+    } else {
+      // q1 找羊途中被野狼围攻
+      this.player.x = 26 * TILE; this.player.y = 22 * TILE; this.player.facing = 'right';
+      line = [{ name: '旁白', text: '大卫被野狼扑倒……他退回路上喘息，握紧投石索准备反击!' }];
     }
     this.showDialogue(line, () => { this.busy = false; });
   }
@@ -767,7 +775,7 @@ export class GameCore {
       const p = this.projectiles[i];
       // 拖尾
       p.trail.push({ x: p.x, y: p.y });
-      if (p.trail.length > 5) p.trail.shift();
+      if (p.trail.length > 7) p.trail.shift();
       p.x += p.vx; p.y += p.vy; p.life--; p.spin += 0.4;
       let remove = false;
       if (p.life <= 0 || this.solidAtPixel(p.x, p.y)) {
@@ -805,9 +813,12 @@ export class GameCore {
     if (d < e.aggro && d > 1) {
       const vx = (pc.x - ec.x) / d;
       const vy = (pc.y - ec.y) / d;
-      e.x += vx * e.spd; e.y += vy * e.spd;
+      e.vx = vx * e.spd; e.vy = vy * e.spd;
+      e.x += e.vx; e.y += e.vy;
       e.x = Math.max(TILE, Math.min(e.x, MAP_W - TILE * 2));
       e.y = Math.max(TILE, Math.min(e.y, MAP_H - TILE * 2));
+    } else {
+      e.vx = 0; e.vy = 0;
     }
 
     if (e.touchCD > 0) e.touchCD--;
@@ -846,7 +857,7 @@ export class GameCore {
     if (this.attackTarget && !this.attackTarget.dead) {
       const ec = this.enemyCenter(this.attackTarget);
       if (dist(this.playerCenter(), ec) <= this.desiredRange()) {
-        this.aimPoint = ec;
+        this.aimPoint = this.leadAim(this.attackTarget, ec);
         this.tryAttack();
       }
     } else if (this.attackTarget) {
@@ -913,6 +924,24 @@ export class GameCore {
       if (d <= radius && d < bestD) { best = e; bestD = d; }
     }
     return best;
+  }
+
+  /** 远程预判：用飞行时间 + 目标速度估算落点，使弹弓能命中移动中的怪。 */
+  private leadAim(e: Enemy, ec: Vec): Vec {
+    if (this.weapon !== 'sling') return ec; // 近战/弹琴无需预判
+    const w = GameData.weapons.sling;
+    const speed = w.projSpeed as number;
+    const t = dist(this.playerCenter(), ec) / Math.max(0.001, speed);
+    return { x: ec.x + e.vx * t, y: ec.y + e.vy * t };
+  }
+
+  /** 渲染层只读：光标世界坐标（用于绘制落点光标/悬停高亮）。 */
+  get cursorAim(): Vec | null { return this.aimPoint; }
+  /** 渲染层只读：当前是否处于「按住跟随」奔跑。 */
+  get followingCursor(): boolean { return this.mouseHeld; }
+  /** 渲染层只读：光标当前悬停命中的敌人（用于高亮）。 */
+  enemyAtCursor(): Enemy | null {
+    return this.aimPoint ? this.enemyAtWorld(this.aimPoint.x, this.aimPoint.y) : null;
   }
 
   /** 当前武器的「开始攻击距离」（点怪追击时用）。 */

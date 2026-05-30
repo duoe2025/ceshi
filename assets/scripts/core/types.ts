@@ -148,6 +148,8 @@ export interface Enemy {
   lootTier: Rarity;
   ambient: boolean; // true=游荡小怪（非主线首领）
   scale: number; // 渲染缩放
+  vx: number; // 上一帧位移（用于远程攻击预判命中）
+  vy: number;
 }
 
 export interface Projectile {
