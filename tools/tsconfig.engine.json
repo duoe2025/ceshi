@@ -12,5 +12,8 @@
   "include": [
     "./cc.d.ts",
     "../assets/scripts/**/*.ts"
+  ],
+  "exclude": [
+    "../assets/scripts/phaser/**/*.ts"
   ]
 }
