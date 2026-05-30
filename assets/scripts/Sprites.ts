@@ -4,18 +4,14 @@
  * 全部通过 Painter 绘制到 Cocos Graphics。
  * ============================================================ */
 
-import { Color } from 'cc';
-import { Painter } from './Painter';
+import { IPainter } from './IPainter';
 import { T } from './core/GameData';
 
-const cache: Record<string, Color> = {};
-function hex(s: string): Color {
-  if (!cache[s]) cache[s] = new Color().fromHEX(s);
-  return cache[s];
-}
+// 颜色直接用 hex 字符串（IPainter 约定），保留 hex() 为透传以减少改动
+function hex(s: string): string { return s; }
 
 // 在以 (x,y) 为左上角、每逻辑像素 = scale 的网格中画一个色块
-function blk(p: Painter, x: number, y: number, scale: number,
+function blk(p: IPainter, x: number, y: number, scale: number,
   col: number, row: number, w: number, h: number, color: string): void {
   p.fillRect(Math.round(x + col * scale), Math.round(y + row * scale),
     Math.ceil(w * scale), Math.ceil(h * scale), hex(color));
@@ -24,7 +20,7 @@ function blk(p: Painter, x: number, y: number, scale: number,
 const TILE = 32;
 
 /* ---------------- 瓦片 ---------------- */
-export function tile(p: Painter, type: number, x: number, y: number): void {
+export function tile(p: IPainter, type: number, x: number, y: number): void {
   const s = TILE;
   switch (type) {
     case T.GRASS:
@@ -109,7 +105,7 @@ export function tile(p: Painter, type: number, x: number, y: number): void {
 
 /* ---------------- 角色 ---------------- */
 // 大卫：牧童，棕发、米色短袍，腰间投石索
-export function david(p: Painter, x: number, y: number, scale: number, facing: string, frame: number): void {
+export function david(p: IPainter, x: number, y: number, scale: number, facing: string, frame: number): void {
   const b = (c: number, r: number, w: number, h: number, col: string) => blk(p, x, y, scale, c, r, w, h, col);
   const step = frame ? 1 : 0;
   b(5, 1, 6, 2, '#6b4a2b'); b(4, 2, 8, 2, '#6b4a2b');
@@ -125,7 +121,7 @@ export function david(p: Painter, x: number, y: number, scale: number, facing: s
 }
 
 // 父亲耶西：长袍、白须
-export function jesse(p: Painter, x: number, y: number, scale: number): void {
+export function jesse(p: IPainter, x: number, y: number, scale: number): void {
   const b = (c: number, r: number, w: number, h: number, col: string) => blk(p, x, y, scale, c, r, w, h, col);
   b(5, 0, 6, 2, '#8a8a8a');
   b(4, 1, 8, 2, '#6f6f6f');
@@ -139,7 +135,7 @@ export function jesse(p: Painter, x: number, y: number, scale: number): void {
 }
 
 // 羊
-export function sheep(p: Painter, x: number, y: number, scale: number): void {
+export function sheep(p: IPainter, x: number, y: number, scale: number): void {
   const b = (c: number, r: number, w: number, h: number, col: string) => blk(p, x, y, scale, c, r, w, h, col);
   b(3, 5, 10, 6, '#f3efe6');
   b(2, 5, 2, 5, '#e8e2d4'); b(12, 5, 2, 5, '#e8e2d4');
@@ -150,7 +146,7 @@ export function sheep(p: Painter, x: number, y: number, scale: number): void {
 }
 
 // 猛狮
-export function lion(p: Painter, x: number, y: number, scale: number, hurt: boolean): void {
+export function lion(p: IPainter, x: number, y: number, scale: number, hurt: boolean): void {
   const b = (c: number, r: number, w: number, h: number, col: string) => blk(p, x, y, scale, c, r, w, h, col);
   const body = hurt ? '#c97a3a' : '#d89a4a';
   const mane = hurt ? '#7a4a1f' : '#8a5a25';
@@ -165,7 +161,7 @@ export function lion(p: Painter, x: number, y: number, scale: number, hurt: bool
 }
 
 // 邪灵：漂浮的黑色斗篷，发光的双眼
-export function spirit(p: Painter, x: number, y: number, scale: number, hurt: boolean): void {
+export function spirit(p: IPainter, x: number, y: number, scale: number, hurt: boolean): void {
   const b = (c: number, r: number, w: number, h: number, col: string) => blk(p, x, y, scale, c, r, w, h, col);
   const robe = hurt ? '#5a4a7a' : '#2e2540';
   const robe2 = hurt ? '#7a6aa0' : '#403458';

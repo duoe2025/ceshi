@@ -9,7 +9,7 @@
  * ============================================================ */
 
 import {
-  _decorators, Component, Node, Graphics, Label, UITransform, Color, Layers,
+  _decorators, Component, Node, Graphics, Label, UITransform, Layers,
   input, Input, EventKeyboard, KeyCode, EventTouch, Vec3,
 } from 'cc';
 import { GameCore } from './core/GameCore';
@@ -17,7 +17,7 @@ import {
   GameData, TILE, MAP_COLS, MAP_ROWS,
 } from './core/GameData';
 import { FinishStats, IGameView } from './core/types';
-import { Painter, rgba } from './Painter';
+import { Painter, rgba, toColor } from './Painter';
 import * as Sprites from './Sprites';
 
 const { ccclass } = _decorators;
@@ -86,7 +86,7 @@ export class GameController extends Component implements IGameView {
     return n;
   }
 
-  private mkLabel(name: string, fontSize: number, color: Color,
+  private mkLabel(name: string, fontSize: number, color: string,
     anchorX: number, anchorY: number, hAlign: number, wrapWidth = 0): Label {
     const n = this.mkNode(name);
     const ut = n.getComponent(UITransform) as UITransform;
@@ -94,7 +94,7 @@ export class GameController extends Component implements IGameView {
     const lb = n.addComponent(Label);
     lb.fontSize = fontSize;
     lb.lineHeight = fontSize + 6;
-    lb.color = color;
+    lb.color = toColor(color);
     lb.useSystemFont = true;
     lb.horizontalAlign = hAlign;
     lb.verticalAlign = Label.VerticalAlign.TOP;
@@ -393,11 +393,11 @@ export class GameController extends Component implements IGameView {
     }
   }
 
-  private drawNameTag(lb: Label, text: string, cx: number, cy: number, color: Color): void {
+  private drawNameTag(lb: Label, text: string, cx: number, cy: number, color: string): void {
     const w = text.length * 12 + 8;
     this.painter.fillRect(cx - w / 2, cy - 12, w, 14, rgba(14, 11, 22, 178));
     lb.string = text;
-    lb.color = color;
+    lb.color = toColor(color);
     lb.node.active = true;
     this.placeLabel(lb, cx, cy - 5);
   }
@@ -439,7 +439,7 @@ export class GameController extends Component implements IGameView {
       const lb = this.lblWeapons[i];
       const label = GameData.weapons[id].label;
       lb.string = label;
-      lb.color = cur ? (ready ? rgba(255, 215, 102) : rgba(156, 139, 79)) : rgba(207, 198, 184);
+      lb.color = toColor(cur ? (ready ? rgba(255, 215, 102) : rgba(156, 139, 79)) : rgba(207, 198, 184));
       lb.node.active = true;
       this.placeLabel(lb, x, y + 8);
       if (cur) {

@@ -1,0 +1,14 @@
+{
+  "appid": "touristappid",
+  "projectname": "david-chapter1",
+  "description": "牧童大卫 · 第一章 Demo（微信小游戏）",
+  "setting": {
+    "es6": false,
+    "minified": false,
+    "postcss": false,
+    "uglifyFileName": false
+  },
+  "compileType": "game",
+  "miniprogramRoot": "./",
+  "libVersion": "3.4.0"
+}
