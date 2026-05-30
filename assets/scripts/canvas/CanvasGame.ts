@@ -625,4 +625,32 @@ export class CanvasGame implements IGameView {
     }
     if (id === this.atkId) { this.atkId = -1; c.setAttack(false); }
   }
+
+  /* ---------------- 输入：鼠标（暗黑式，桌面端） ---------------- */
+  /** 屏幕坐标 → 世界坐标（按当前相机，不含抖动）。 */
+  private screenToWorld(sx: number, sy: number): { x: number; y: number } {
+    const { camX, camY } = this.camera(0);
+    return { x: sx + camX, y: sy + camY };
+  }
+
+  /** 鼠标移动：转发为核心瞄准点。 */
+  mouseMove(sx: number, sy: number): void {
+    const w = this.screenToWorld(sx, sy);
+    this.core.mouseAim(w.x, w.y);
+  }
+
+  /** 鼠标左键按下：先处理结算/对白，否则换算到世界并交给核心（点地跑/点怪打）。 */
+  mouseDownLeft(sx: number, sy: number): void {
+    const c = this.core;
+    if (this.finished) { this.start(); return; }
+    if (c.dialogueActive()) { c.advanceDialogue(); return; }
+    if (c.equipPanelOpen || c.questLogOpen) return;
+    const w = this.screenToWorld(sx, sy);
+    c.mouseDown(w.x, w.y);
+  }
+
+  /** 鼠标左键松开。 */
+  mouseUpLeft(): void {
+    this.core.mouseUp();
+  }
 }

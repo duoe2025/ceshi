@@ -70,6 +70,12 @@ export class GameCore {
   };
   input: InputState = { left: false, right: false, up: false, down: false, attack: false };
 
+  /* ---- 暗黑式鼠标操作（点地跑动 / 点怪追击 / 朝光标攻击） ---- */
+  moveTarget: Vec | null = null;   // 左键点地：奔跑目标点（世界坐标）
+  attackTarget: Enemy | null = null; // 左键点怪：追击并攻击的目标
+  private aimPoint: Vec | null = null; // 光标世界坐标（用于攻击瞄准）
+  private mouseHeld = false;       // 左键是否按住（按住持续跟随光标）
+
   lostSheep: LostSheep[] = [];
   sheepCollected = 0;
   lionActive = false;
@@ -157,6 +163,10 @@ export class GameCore {
     this.shake = 0;
     this.playerHurt = 0;
     this.input = { left: false, right: false, up: false, down: false, attack: false };
+    this.moveTarget = null;
+    this.attackTarget = null;
+    this.aimPoint = null;
+    this.mouseHeld = false;
     this.dlg = { active: false, queue: [], current: null, onDone: null };
     this.questLogOpen = false;
     this.equipPanelOpen = false;
@@ -284,8 +294,36 @@ export class GameCore {
     if (this.input.up) dy -= 1;
     if (this.input.down) dy += 1;
 
+    const kbActive = (dx !== 0 || dy !== 0);
+    let mouseDriven = false;
+    if (kbActive) {
+      // 键盘输入优先，取消鼠标导航
+      this.moveTarget = null;
+      this.attackTarget = null;
+      this.mouseHeld = false;
+    } else {
+      // 暗黑式鼠标导航：朝攻击目标/移动目标点奔跑
+      if (this.attackTarget && this.attackTarget.dead) this.attackTarget = null;
+      if (this.mouseHeld && this.aimPoint) this.moveTarget = this.aimPoint;
+      let tgt: Vec | null = null;
+      if (this.attackTarget) {
+        const ec = this.enemyCenter(this.attackTarget);
+        if (dist(this.playerCenter(), ec) > this.desiredRange()) tgt = ec; // 未进入射程则靠近
+      } else if (this.moveTarget) {
+        tgt = this.moveTarget;
+      }
+      if (tgt) {
+        const pc = this.playerCenter();
+        const ddx = tgt.x - pc.x;
+        const ddy = tgt.y - pc.y;
+        const len = Math.hypot(ddx, ddy);
+        if (len > 4) { dx = ddx / len; dy = ddy / len; mouseDriven = true; }
+        else if (!this.attackTarget) { this.moveTarget = null; }
+      }
+    }
+
     this.player.moving = (dx !== 0 || dy !== 0);
-    if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
+    if (!mouseDriven && dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
 
     if (dx < 0) this.player.facing = 'left';
     else if (dx > 0) this.player.facing = 'right';
@@ -458,7 +496,7 @@ export class GameCore {
     const wpn = GameData.weapons[this.weapon];
     this.attackCD = Math.round(wpn.cd * this.derived.cdScale);
     const pc = this.playerCenter();
-    const dir = facingVec(this.player.facing);
+    const dir = this.attackDir();
 
     if (this.weapon === 'sling') {
       // 蓄力拉弓特效 + 飞石（带拖尾）
@@ -804,6 +842,16 @@ export class GameCore {
 
   private updateCombat(): void {
     if (this.attackCD > 0) this.attackCD--;
+    // 鼠标点怪：进入射程后朝目标自动攻击
+    if (this.attackTarget && !this.attackTarget.dead) {
+      const ec = this.enemyCenter(this.attackTarget);
+      if (dist(this.playerCenter(), ec) <= this.desiredRange()) {
+        this.aimPoint = ec;
+        this.tryAttack();
+      }
+    } else if (this.attackTarget) {
+      this.attackTarget = null;
+    }
     if (this.input.attack) this.tryAttack();
     this.updateProjectiles();
     this.updateEnemies();
@@ -825,6 +873,72 @@ export class GameCore {
   }
   setAttack(down: boolean): void {
     this.input.attack = down;
+  }
+
+  /* ---------------- 暗黑式鼠标输入（世界坐标，渲染层负责屏幕→世界换算） ---------------- */
+  /** 光标移动：记录瞄准点；按住左键时持续跟随光标奔跑。 */
+  mouseAim(wx: number, wy: number): void {
+    this.aimPoint = { x: wx, y: wy };
+    if (this.mouseHeld) { this.moveTarget = { x: wx, y: wy }; }
+  }
+
+  /** 左键按下：点中怪物→追击攻击；点中地面→奔跑到该点（按住持续跟随）。 */
+  mouseDown(wx: number, wy: number): void {
+    if (!this.running || this.busy || this.dlg.active
+      || this.equipPanelOpen || this.questLogOpen) return;
+    this.aimPoint = { x: wx, y: wy };
+    const e = this.enemyAtWorld(wx, wy);
+    if (e) {
+      this.attackTarget = e;
+      this.moveTarget = null;
+      this.mouseHeld = false;
+      return;
+    }
+    this.attackTarget = null;
+    this.moveTarget = { x: wx, y: wy };
+    this.mouseHeld = true;
+  }
+
+  /** 左键松开：停止「按住跟随」，但保留当前目标点让角色走到位（暗黑手感）。 */
+  mouseUp(): void { this.mouseHeld = false; }
+
+  /** 命中测试：返回光标命中的存活敌人（取最近一个）。 */
+  private enemyAtWorld(wx: number, wy: number): Enemy | null {
+    let best: Enemy | null = null;
+    let bestD = Infinity;
+    for (const e of this.allEnemies()) {
+      const ec = this.enemyCenter(e);
+      const radius = TILE * (e.scale || 2) * 0.5 + 6;
+      const d = dist({ x: wx, y: wy }, ec);
+      if (d <= radius && d < bestD) { best = e; bestD = d; }
+    }
+    return best;
+  }
+
+  /** 当前武器的「开始攻击距离」（点怪追击时用）。 */
+  private desiredRange(): number {
+    const w = GameData.weapons[this.weapon];
+    if (this.weapon === 'staff') return (w.reach as number) - 4;
+    if (this.weapon === 'harp') return (w.radius as number) - 4;
+    // 弹弓远程：进入弹道有效范围即开火
+    const projReach = (w.projSpeed as number) * (w.projLife as number);
+    return Math.min(240, projReach || 220);
+  }
+
+  /** 攻击朝向：有光标瞄准点则朝光标（并同步精灵朝向），否则用当前 facing。 */
+  private attackDir(): Vec {
+    if (this.aimPoint) {
+      const pc = this.playerCenter();
+      const dx = this.aimPoint.x - pc.x;
+      const dy = this.aimPoint.y - pc.y;
+      const len = Math.hypot(dx, dy);
+      if (len > 0.01) {
+        if (Math.abs(dx) > Math.abs(dy)) this.player.facing = dx < 0 ? 'left' : 'right';
+        else this.player.facing = dy < 0 ? 'up' : 'down';
+        return { x: dx / len, y: dy / len };
+      }
+    }
+    return facingVec(this.player.facing);
   }
   confirm(): void {
     if (this.dlg.active) { this.advanceDialogue(); return; }
