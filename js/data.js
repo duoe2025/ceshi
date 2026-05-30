@@ -142,36 +142,49 @@ const GameData = {
   /* 邪灵（任务三），击退猛狮后夜里出现在羊圈门口 */
   spirit: { c: 9, r: 21, name: '邪灵' },
 
-  /* 敌人数据。type=beast 受物理伤害；type=spirit 几乎免疫物理，惧怕弹琴 */
+  /* 敌人数据（ARPG 即时战斗）。
+   * type=beast 受物理伤害；type=spirit 几乎免疫物理，惧怕弹琴
+   * spd=每帧移动像素；aggro=进入追逐的距离；touchCD=接触攻击冷却帧；touchRange=接触判定距离 */
   enemies: {
     lion: {
       name: '猛狮',
       type: 'beast',
       maxHp: 30,
-      atk: 6,
+      atk: 4,
+      spd: 1.6,
+      aggro: 220,
+      touchCD: 50,
+      touchRange: 28,
       sprite: 'lion',
       attackName: '利爪',
     },
     spirit: {
       name: '邪灵',
       type: 'spirit',
-      maxHp: 24,
-      atk: 5,
+      maxHp: 26,
+      atk: 4,
+      spd: 1.5,
+      aggro: 999,        // 夜战开局即缠斗
+      touchCD: 50,
+      touchRange: 32,
       sprite: 'spirit',
       attackName: '阴影侵蚀',
     },
   },
 
-  /* 大卫的战斗技能
-   * dmgType: 'phys' 物理（弹弓/杖杆）——对邪灵几乎无效
-   * kind:'harp' 弹琴赞美——驱赶邪灵的关键，对野兽则起安抚作用 */
-  skills: [
-    { id: 'sling', name: '投石索', desc: '弹弓·远程主力', kind: 'attack', dmgType: 'phys', minDmg: 6, maxDmg: 10, hit: 0.92 },
-    { id: 'staff', name: '杖与杆', desc: '近战·护羊',   kind: 'attack', dmgType: 'phys', minDmg: 4, maxDmg: 7,  hit: 1.0 },
-    { id: 'harp',  name: '弹琴赞美', desc: '驱邪·安抚',  kind: 'harp',   minDmg: 9, maxDmg: 13, hit: 1.0 },
-    { id: 'guard', name: '守势',   desc: '减伤+回血',    kind: 'guard', heal: 3 },
-    { id: 'pray',  name: '祷告',   desc: '回复体力',      kind: 'heal',  heal: 7 },
-  ],
+  /* 三种武器（即时攻击）
+   * dmgType:'phys' 物理（弹弓/杖杆）——对邪灵几乎无效
+   * kind:'harp' 弹琴赞美——驱赶邪灵的关键，对野兽则起安抚作用
+   * cd=攻击冷却帧；sling 远程发射飞石，staff 近战范围，harp 周身圣琴声波 */
+  weapons: {
+    sling: { id: 'sling', name: '弹弓', label: '① 弹弓', hint: '远程·边跑边打', dmgType: 'phys',
+             cd: 22, projSpeed: 7, projLife: 64, hitR: 22, minDmg: 6, maxDmg: 10 },
+    staff: { id: 'staff', name: '杖与杆', label: '② 杖杆', hint: '近战·护羊', dmgType: 'phys',
+             cd: 16, reach: 48, minDmg: 5, maxDmg: 8 },
+    harp:  { id: 'harp', name: '弹琴赞美', label: '③ 弹琴', hint: '驱邪·周身声波', kind: 'harp',
+             cd: 58, radius: 124, minDmg: 9, maxDmg: 13 },
+  },
+  weaponOrder: ['sling', 'staff', 'harp'],
 
   /* 对白脚本 */
   dialogue: {
