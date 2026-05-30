@@ -1,0 +1,254 @@
+:root {
+  --bg: #1a1726;
+  --panel: #2b2438;
+  --panel-light: #3a3150;
+  --ink: #f4ecd8;
+  --accent: #e0b250;
+  --accent-2: #6fae6b;
+  --danger: #d9534f;
+  --frame: #0e0b16;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #0b0910;
+  color: var(--ink);
+  font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#game-shell {
+  max-width: 820px;
+  margin: 0 auto;
+  padding: 16px 10px 40px;
+}
+
+#title-bar h1 {
+  font-size: 20px;
+  letter-spacing: 1px;
+  margin: 4px 0 12px;
+  text-align: center;
+  color: var(--accent);
+}
+#title-bar h1 span {
+  color: #b9aecb;
+  font-size: 14px;
+  font-weight: normal;
+}
+
+#stage {
+  position: relative;
+  width: 800px;
+  height: 576px;
+  max-width: 100%;
+  margin: 0 auto;
+  border: 4px solid var(--frame);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+}
+
+#screen, #battle-canvas {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  width: 100%;
+  height: 100%;
+}
+
+.hidden { display: none !important; }
+
+/* ---------- HUD ---------- */
+#hud {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 10px 12px;
+  pointer-events: none;
+  font-size: 13px;
+}
+
+#hp-box {
+  background: rgba(14,11,22,0.78);
+  border: 2px solid var(--frame);
+  border-radius: 6px;
+  padding: 6px 10px;
+  min-width: 180px;
+}
+#hp-box .label { font-weight: bold; color: var(--accent); margin-right: 6px; }
+.bar-outer {
+  display: inline-block;
+  width: 110px; height: 10px;
+  background: #4a1f1f;
+  border: 1px solid #000;
+  border-radius: 3px;
+  vertical-align: middle;
+  overflow: hidden;
+}
+.bar-inner {
+  height: 100%;
+  width: 100%;
+  background: linear-gradient(#7ee07e, #3fae4f);
+  transition: width 0.25s ease;
+}
+#hp-text { display: block; margin-top: 3px; color: #cfc6b6; font-size: 11px; }
+
+#quest-tracker {
+  background: rgba(14,11,22,0.78);
+  border: 2px solid var(--frame);
+  border-radius: 6px;
+  padding: 6px 10px;
+  max-width: 260px;
+  text-align: right;
+}
+#quest-tracker .quest-title { color: var(--accent); font-weight: bold; font-size: 11px; }
+#quest-objective { font-size: 13px; margin-top: 2px; }
+
+/* ---------- Dialogue ---------- */
+#dialogue {
+  position: absolute;
+  left: 16px; right: 16px; bottom: 16px;
+  background: rgba(20,16,32,0.95);
+  border: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 14px 18px 18px;
+  min-height: 96px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+}
+#dialogue-name {
+  position: absolute;
+  top: -14px; left: 16px;
+  background: var(--accent);
+  color: #2b1d05;
+  font-weight: bold;
+  font-size: 13px;
+  padding: 2px 12px;
+  border-radius: 4px;
+}
+#dialogue-text { font-size: 16px; line-height: 1.6; min-height: 48px; }
+#dialogue-hint { text-align: right; font-size: 12px; color: var(--accent); margin-top: 6px; }
+
+/* ---------- Battle ---------- */
+#battle {
+  position: absolute;
+  inset: 0;
+  background: #050309;
+  display: flex;
+  flex-direction: column;
+}
+#battle-scene { height: 380px; background: #1a2e1a; }
+#battle-bottom {
+  flex: 1;
+  display: flex;
+  border-top: 3px solid var(--frame);
+}
+#battle-log {
+  flex: 1.4;
+  padding: 12px 16px;
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-y: auto;
+  background: rgba(20,16,32,0.95);
+}
+#battle-menu {
+  flex: 1;
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  align-content: start;
+  background: var(--panel);
+  border-left: 3px solid var(--frame);
+}
+.battle-action {
+  background: var(--panel-light);
+  border: 2px solid var(--frame);
+  border-radius: 6px;
+  color: var(--ink);
+  padding: 12px 8px;
+  font-size: 15px;
+  cursor: pointer;
+  text-align: center;
+  transition: transform 0.06s;
+}
+.battle-action small { display:block; font-size: 11px; color:#b9aecb; margin-top: 3px; }
+.battle-action.selected {
+  border-color: var(--accent);
+  background: #4a3f63;
+  box-shadow: 0 0 0 2px var(--accent) inset;
+}
+.battle-action:disabled { opacity: 0.4; cursor: default; }
+
+/* ---------- Toast ---------- */
+#toast {
+  position: absolute;
+  top: 70px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(14,11,22,0.92);
+  border: 2px solid var(--accent-2);
+  color: var(--ink);
+  padding: 10px 18px;
+  border-radius: 20px;
+  font-size: 14px;
+  z-index: 30;
+  animation: toast-in 0.25s ease;
+}
+@keyframes toast-in { from { opacity:0; transform: translate(-50%, -8px);} to {opacity:1;} }
+
+/* ---------- Start / End screens ---------- */
+#start-screen, #end-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 35%, #2a2340, #0b0910 75%);
+  z-index: 40;
+}
+.start-card {
+  text-align: center;
+  max-width: 480px;
+  padding: 10px 24px;
+}
+.start-card h2 { font-size: 38px; color: var(--accent); margin: 0 0 4px; letter-spacing: 4px; }
+.start-card .subtitle { color: var(--accent-2); margin: 0 0 18px; font-size: 16px; letter-spacing: 2px; }
+.start-card .blurb { font-size: 15px; line-height: 1.8; color: #d7cfe0; }
+.start-card button {
+  margin-top: 18px;
+  background: var(--accent);
+  color: #2b1d05;
+  border: none;
+  border-radius: 6px;
+  padding: 12px 36px;
+  font-size: 18px;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 0 #9c7a2e;
+}
+.start-card button:active { transform: translateY(2px); box-shadow: 0 2px 0 #9c7a2e; }
+.start-card .controls { margin-top: 22px; font-size: 12px; color: #9c93ab; line-height: 1.7; }
+
+/* ---------- Quest log ---------- */
+#quest-log {
+  margin: 14px auto 0;
+  max-width: 800px;
+  background: var(--panel);
+  border: 3px solid var(--frame);
+  border-radius: 8px;
+  padding: 12px 18px;
+}
+#quest-log h3 { margin: 4px 0 10px; color: var(--accent); font-size: 16px; }
+#quest-log .close-hint { font-size: 11px; color: #9c93ab; font-weight: normal; }
+#quest-log-list { list-style: none; margin: 0; padding: 0; }
+#quest-log-list li { padding: 6px 0; border-bottom: 1px solid #423957; font-size: 14px; }
+#quest-log-list li .status { float: right; font-size: 12px; }
+#quest-log-list li.done { color: #8fbf8f; }
+#quest-log-list li.done .status { color: var(--accent-2); }
+#quest-log-list li.active .status { color: var(--accent); }
+#quest-log-list li.locked { color: #6c6480; }
