@@ -6,7 +6,8 @@
 
 import Phaser from 'phaser';
 import { VIEW_W, VIEW_H } from '../canvas/CanvasGame';
-import { GameScene } from './GameScene';
+import { WorldScene } from './WorldScene';
+import { UIScene } from './UIScene';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -19,7 +20,8 @@ const game = new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  scene: [GameScene],
+  // WorldScene 在前：每帧先 step()+渲染世界并写入 registry；UIScene 叠加渲染 HUD。
+  scene: [WorldScene, UIScene],
 });
 // 调试钩子：浏览器控制台可访问 __DAVID.game / 当前场景
 (window as unknown as { __DAVID: Phaser.Game }).__DAVID = game;

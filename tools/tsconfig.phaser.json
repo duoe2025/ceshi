@@ -19,6 +19,7 @@
     "../assets/scripts/engine/**/*.ts",
     "../assets/scripts/canvas/**/*.ts",
     "../assets/scripts/IPainter.ts",
+    "../assets/scripts/ITextLayer.ts",
     "../assets/scripts/Sprites.ts",
     "../assets/scripts/core/**/*.ts"
   ]
