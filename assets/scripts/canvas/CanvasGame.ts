@@ -38,6 +38,9 @@ export class CanvasGame implements IGameView {
   private textLayer: ITextLayer;
   core: GameCore;
 
+  /** Phaser 原生路径置 true：飞石拖尾改由原生粒子发射器绘制，drawProjectile 不再自绘拖尾。 */
+  nativeProjectileTrail = false;
+
   private acc = 0;
   private last = 0;
   private animClock = 0;
@@ -379,10 +382,13 @@ export class CanvasGame implements IGameView {
 
   private drawProjectile(pr: { x: number; y: number; trail: Array<{ x: number; y: number }> }, camX: number, camY: number): void {
     const p = this.painter;
-    pr.trail.forEach((t, i) => {
-      const a = Math.min(170, 40 + i * 32);
-      p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
-    });
+    // Phaser 原生路径用粒子发射器画拖尾；其余路径（浏览器/微信 Canvas）仍自绘拖尾。
+    if (!this.nativeProjectileTrail) {
+      pr.trail.forEach((t, i) => {
+        const a = Math.min(170, 40 + i * 32);
+        p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
+      });
+    }
     const x = pr.x - camX; const y = pr.y - camY;
     p.fillCircle(x, y, 4, rgba(207, 202, 187));
     p.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));

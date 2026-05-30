@@ -34,6 +34,7 @@ export class WorldScene extends Phaser.Scene {
   private sparks!: Phaser.GameObjects.Particles.ParticleEmitter; // 命中迸溅
   private motes!: Phaser.GameObjects.Particles.ParticleEmitter;  // 升级/暴击 金色
   private beams!: Phaser.GameObjects.Particles.ParticleEmitter;  // 掉落光柱（按稀有度着色）
+  private trail!: Phaser.GameObjects.Particles.ParticleEmitter;  // 弹弓飞石拖尾（石屑）
   private seenFx = new WeakSet<object>();   // 已处理的特效（命中/暴击/升级）
   private seenLoot = new WeakSet<object>(); // 已喷光柱的地面掉落
   private night!: Phaser.GameObjects.Rectangle; // 夜战压暗（原生固定层，仅暗世界不暗 HUD）
@@ -64,6 +65,7 @@ export class WorldScene extends Phaser.Scene {
       .setOrigin(0, 0).setScrollFactor(0).setDepth(6).setVisible(false);
 
     this.initParticles();
+    this.game1.nativeProjectileTrail = true; // 飞石拖尾改走原生粒子，关闭自绘拖尾
     this.bindInput();
     this.game1.start();
 
@@ -116,6 +118,17 @@ export class WorldScene extends Phaser.Scene {
       emitting: false,
     });
     this.beams.setDepth(2);
+
+    // 弹弓飞石拖尾：淡灰石屑，短命、低速、渐隐，逐帧在飞石位置喷出
+    this.trail = this.add.particles(0, 0, 'spark', {
+      lifespan: 240,
+      speed: { min: 8, max: 28 },
+      scale: { start: 1.1, end: 0 },
+      alpha: { start: 0.7, end: 0 },
+      tint: 0xcbc3af,
+      emitting: false,
+    });
+    this.trail.setDepth(2); // 飞石（图元 depth 0）之上、文本之下
   }
 
   private bindInput(): void {
@@ -162,6 +175,7 @@ export class WorldScene extends Phaser.Scene {
     // 4) 原生特效：命中粒子 + 受击/重击相机反馈
     this.emitEffectParticles();
     this.emitLootBeams();
+    this.emitProjectileTrails();
     this.cameraFeedback();
 
     // 夜战压暗（原生层）：邪灵阶段未驱散时变暗
@@ -195,6 +209,12 @@ export class WorldScene extends Phaser.Scene {
       this.beams.particleTint = hexToInt(rarityColor(g.item.rarity));
       this.beams.explode(10, g.x, g.y);
     }
+  }
+
+  /** 逐帧在每颗飞行中的飞石位置喷一粒石屑，形成原生粒子拖尾。 */
+  private emitProjectileTrails(): void {
+    const ps = this.game1.core.projectiles as Array<{ x: number; y: number }>;
+    for (const pr of ps) this.trail.emitParticleAt(pr.x, pr.y, 1);
   }
 
   private cameraFeedback(): void {
