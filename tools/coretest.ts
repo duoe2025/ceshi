@@ -9,6 +9,10 @@ import {
   GameData, TILE, MAP_COLS, MAP_ROWS, SOLID_TILES,
 } from '../assets/scripts/core/GameData';
 import { FinishStats, IGameView } from '../assets/scripts/core/types';
+import {
+  defaultAttributes, derive, emptyEquipment, reduction, scoreItem, weaponDamage, xpToNext,
+} from '../assets/scripts/core/Stats';
+import { rollItem, rollLoot, RARITY_META } from '../assets/scripts/core/Items';
 
 let finished: FinishStats | null = null;
 const view: IGameView = {
@@ -17,6 +21,7 @@ const view: IGameView = {
 };
 
 const core = new GameCore(view);
+core.ambientEnabled = false; // 关闭游荡小怪，保证流程确定性
 let assertions = 0;
 let failures = 0;
 function check(cond: boolean, msg: string): void {
@@ -202,6 +207,10 @@ check(core.phase === 'q3', '入夜后 phase=q3');
 check(core.enemy !== null && core.enemy!.key === 'spirit', '邪灵已生成');
 check(core.weapon === 'harp', '自动切换到弹琴 harp');
 
+console.log('\n[4b] 击败猛狮获得经验与掉落');
+check(core.player.xp >= 20, `击败猛狮获得经验（xp=${core.player.xp}）`);
+check(core.groundItems.length >= 1, `猛狮掉落了装备（地面 ${core.groundItems.length} 件）`);
+
 console.log('\n[5] 物理攻击对邪灵几乎无效（伤害门控）');
 if (core.enemy) {
   core.setWeapon('sling');
@@ -246,6 +255,43 @@ check(core.spiritDefeated, '邪灵已被驱散 spiritDefeated=true');
 check(core.phase === 'done', 'phase=done');
 check(finished !== null, '已触发通关回调 onFinish');
 check(!core.running, '通关后 running=false');
+
+console.log('\n[7] 数值系统单元校验（属性/伤害/减伤/经验）');
+{
+  const d0 = derive(defaultAttributes(), emptyEquipment());
+  check(d0.maxHp === 20 + 6 * 4, `初始最大生命 = 20+VIT*4 = ${d0.maxHp}`);
+  check(d0.physMul > 1, `力量提升物理乘数 physMul=${d0.physMul.toFixed(3)}`);
+  check(d0.holyMul > 1, `信心提升驱邪乘数 holyMul=${d0.holyMul.toFixed(3)}`);
+  const wd = weaponDamage('phys', 6, 10, d0);
+  check(wd.min >= 6 && wd.max >= wd.min, `物理伤害随属性放大 [${wd.min},${wd.max}]`);
+  const wh = weaponDamage('harp', 9, 13, d0);
+  check(wh.min >= 9, `驱邪伤害随信心放大 [${wh.min},${wh.max}]`);
+  check(reduction(0, 1) === 0, '无护甲时减伤为 0');
+  check(reduction(50, 1) > reduction(10, 1), '护甲越高减伤越高（单调）');
+  check(reduction(99999, 1) <= 0.75, '护甲减伤封顶 75%');
+  check(xpToNext(1) === 35 && xpToNext(2) === 50, '升级经验曲线 xpToNext 正确');
+}
+
+console.log('\n[8] 装备系统单元校验（稀有度/词缀/评分/掉落）');
+{
+  const common = rollItem('armor', 8, 'common');
+  const rare = rollItem('armor', 8, 'rare');
+  const uniq = rollItem('focus', 12, 'unique');
+  check(common.affixes.length >= RARITY_META.common.minAffix
+    && common.affixes.length <= RARITY_META.common.maxAffix, `普通装备词缀数符合区间（${common.affixes.length}）`);
+  check(rare.affixes.length >= RARITY_META.rare.minAffix, `稀有装备至少 ${RARITY_META.rare.minAffix} 条词缀（${rare.affixes.length}）`);
+  check(scoreItem(rare) > scoreItem(common), '稀有装备评分高于普通装备');
+  check(scoreItem(uniq) > scoreItem(null), '暗金装备评分高于空槽');
+  const d1 = derive(defaultAttributes(), { focus: null, armor: rare, helm: null, amulet: null, ring: null });
+  const d0 = derive(defaultAttributes(), emptyEquipment());
+  check(d1.armor >= d0.armor, `穿上护甲后护甲值不降（${d0.armor}→${d1.armor}）`);
+  let dropped = 0;
+  for (let i = 0; i < 50; i++) if (rollLoot({ level: 2, lootChance: 1, lootTier: 'rare' })) dropped++;
+  check(dropped === 50, '必掉敌人（lootChance=1）每次都掉落');
+  const rareOrBetter = ['rare', 'unique'];
+  const sample = rollLoot({ level: 2, lootChance: 1, lootTier: 'rare' });
+  check(!!sample && rareOrBetter.indexOf(sample.rarity) >= 0, `掉落稀有度不低于下限（${sample && sample.rarity}）`);
+}
 
 console.log(`\n=== 结果：${assertions - failures}/${assertions} 通过 ===`);
 if (failures > 0) { console.error(`有 ${failures} 项失败`); process.exit(1); }

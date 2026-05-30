@@ -190,28 +190,63 @@
       lion: {
         name: "\u731B\u72EE",
         type: "beast",
-        maxHp: 30,
-        atk: 4,
+        maxHp: 44,
+        atk: 5,
         spd: 1.6,
         aggro: 220,
         touchCD: 50,
         touchRange: 28,
         sprite: "lion",
-        attackName: "\u5229\u722A"
+        attackName: "\u5229\u722A",
+        level: 2,
+        xp: 30,
+        lootChance: 1,
+        lootTier: "rare"
       },
       spirit: {
         name: "\u90AA\u7075",
         type: "spirit",
-        maxHp: 26,
-        atk: 4,
+        maxHp: 40,
+        atk: 5,
         spd: 1.5,
         aggro: 999,
         touchCD: 50,
         touchRange: 32,
         sprite: "spirit",
-        attackName: "\u9634\u5F71\u4FB5\u8680"
+        attackName: "\u9634\u5F71\u4FB5\u8680",
+        level: 3,
+        xp: 45,
+        lootChance: 1,
+        lootTier: "unique"
+      },
+      wolf: {
+        name: "\u91CE\u72FC",
+        type: "beast",
+        maxHp: 14,
+        atk: 3,
+        spd: 1.7,
+        aggro: 150,
+        touchCD: 46,
+        touchRange: 24,
+        sprite: "lion",
+        attackName: "\u6495\u54AC",
+        level: 1,
+        xp: 8,
+        lootChance: 0.55,
+        lootTier: "common"
       }
     },
+    /* 游荡小怪刷新点（关卡丰富化：提供刷经验/掉落的野外） */
+    ambientSpawns: [
+      { key: "wolf", c: 27, r: 7 },
+      { key: "wolf", c: 14, r: 9 },
+      { key: "wolf", c: 22, r: 20 }
+    ],
+    /* 宝箱（走近按空格开启，掉落装备） */
+    chests: [
+      { c: 12, r: 6, level: 2 },
+      { c: 31, r: 18, level: 3 }
+    ],
     /* 三种武器（即时攻击）
      * dmgType:'phys' 物理（弹弓/杖杆）——对邪灵几乎无效
      * kind:'harp' 弹琴赞美——驱赶邪灵的关键，对野兽则起安抚作用
@@ -309,6 +344,310 @@
     }
   };
 
+  // assets/scripts/core/Stats.ts
+  var SLOTS = ["focus", "armor", "helm", "amulet", "ring"];
+  function defaultAttributes() {
+    return { str: 6, dex: 6, vit: 6, fai: 6 };
+  }
+  function emptyEquipment() {
+    return { focus: null, armor: null, helm: null, amulet: null, ring: null };
+  }
+  function sumAffix(equip, stat) {
+    let total = 0;
+    for (const s of SLOTS) {
+      const it = equip[s];
+      if (!it)
+        continue;
+      if (stat === "armor")
+        total += it.baseArmor;
+      for (const a of it.affixes)
+        if (a.stat === stat)
+          total += a.value;
+    }
+    return total;
+  }
+  function derive(attr, equip) {
+    const str = attr.str + sumAffix(equip, "str");
+    const dex = attr.dex + sumAffix(equip, "dex");
+    const vit = attr.vit + sumAffix(equip, "vit");
+    const fai = attr.fai + sumAffix(equip, "fai");
+    const physMul = (1 + str * 0.03) * (1 + sumAffix(equip, "physPct") / 100);
+    const holyMul = 1 + fai * 0.05;
+    const cdRaw = (1 - Math.min(0.4, dex * 4e-3)) * (1 - sumAffix(equip, "cdScale") / 100);
+    return {
+      maxHp: Math.round(20 + vit * 4 + sumAffix(equip, "maxHp")),
+      maxStamina: Math.round(50 + fai * 2),
+      physMul,
+      holyMul,
+      physFlat: 0,
+      holyFlat: sumAffix(equip, "holy"),
+      armor: Math.floor(sumAffix(equip, "armor") + dex * 0.25),
+      crit: Math.min(0.5, 0.05 + dex * 2e-3 + sumAffix(equip, "crit") / 100),
+      critMult: 1.5 + sumAffix(equip, "critDmg") / 100,
+      dodge: Math.min(0.3, dex * 3e-3),
+      cdScale: Math.max(0.5, cdRaw),
+      lifeSteal: sumAffix(equip, "lifeSteal") / 100,
+      xpPct: sumAffix(equip, "xpPct") / 100,
+      pickup: 30 + sumAffix(equip, "pickup")
+    };
+  }
+  function reduction(armor, enemyLevel) {
+    return Math.min(0.75, armor / (armor + 10 + 8 * Math.max(1, enemyLevel)));
+  }
+  function weaponDamage(kind, baseMin, baseMax, d) {
+    if (kind === "harp") {
+      return {
+        min: Math.round(baseMin * d.holyMul + d.holyFlat),
+        max: Math.round(baseMax * d.holyMul + d.holyFlat)
+      };
+    }
+    return {
+      min: Math.round(baseMin * d.physMul + d.physFlat),
+      max: Math.round(baseMax * d.physMul + d.physFlat)
+    };
+  }
+  function xpToNext(level) {
+    return 20 + level * 15;
+  }
+  function levelUpAttributes(attr, newLevel) {
+    const next = {
+      str: attr.str + 1,
+      dex: attr.dex + 1,
+      vit: attr.vit + 1,
+      fai: attr.fai
+    };
+    if (newLevel % 2 === 0)
+      next.fai += 1;
+    return next;
+  }
+  function scoreItem(item) {
+    if (!item)
+      return -1;
+    const W = {
+      str: 1.2,
+      dex: 1.2,
+      vit: 1,
+      fai: 1.2,
+      maxHp: 0.25,
+      physPct: 1.5,
+      armor: 0.4,
+      crit: 2,
+      critDmg: 0.6,
+      cdScale: 1.5,
+      lifeSteal: 1.5,
+      holy: 1,
+      xpPct: 0.5,
+      pickup: 0.1
+    };
+    let s = item.baseArmor * 0.4 + item.itemLevel * 0.5;
+    for (const a of item.affixes)
+      s += a.value * (W[a.stat] || 0.5);
+    const rarityBonus = { common: 0, magic: 2, rare: 5, unique: 10 };
+    return s + (rarityBonus[item.rarity] || 0);
+  }
+
+  // assets/scripts/core/Items.ts
+  function ri(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+  function pick(arr) {
+    return arr[ri(0, arr.length - 1)];
+  }
+  var RARITY_META = {
+    common: { name: "\u666E\u901A", color: "#c8c8c8", minAffix: 0, maxAffix: 0 },
+    magic: { name: "\u9B54\u6CD5", color: "#4a90ff", minAffix: 1, maxAffix: 2 },
+    rare: { name: "\u7A00\u6709", color: "#ffd24a", minAffix: 3, maxAffix: 4 },
+    unique: { name: "\u6697\u91D1", color: "#ff8a3c", minAffix: 3, maxAffix: 4 }
+  };
+  var RARITY_ORDER = ["common", "magic", "rare", "unique"];
+  function rarityColor(r) {
+    return RARITY_META[r].color;
+  }
+  function rarityName(r) {
+    return RARITY_META[r].name;
+  }
+  var SLOT_NOUN = {
+    focus: "\u6295\u77F3\u7D22",
+    armor: "\u76AE\u7532",
+    helm: "\u5934\u5DFE",
+    amulet: "\u62A4\u7B26",
+    ring: "\u6307\u73AF"
+  };
+  var SLOT_QUALITY = {
+    focus: ["\u78E8\u4EAE\u7684", "\u4E0A\u597D\u7684", "\u730E\u624B\u7684", "\u7CBE\u51C6\u7684"],
+    armor: ["\u7ED3\u5B9E\u7684", "\u52A0\u539A\u7684", "\u78D0\u77F3\u822C\u7684", "\u7267\u4EBA\u7684"],
+    helm: ["\u8F7B\u4FBF\u7684", "\u575A\u56FA\u7684", "\u5B88\u671B\u8005\u7684", "\u7F8A\u6BDB\u7684"],
+    amulet: ["\u53E4\u65E7\u7684", "\u5723\u6D01\u7684", "\u8499\u798F\u7684", "\u4F2F\u5229\u6052\u7684"],
+    ring: ["\u6734\u7D20\u7684", "\u9576\u5D4C\u7684", "\u4FE1\u5B9E\u7684", "\u7EA6\u5B9A\u7684"]
+  };
+  var SLOT_AFFIXES = {
+    focus: ["physPct", "holy", "crit", "str", "fai", "critDmg"],
+    armor: ["armor", "maxHp", "vit", "str"],
+    helm: ["armor", "vit", "maxHp", "fai"],
+    amulet: ["crit", "critDmg", "str", "dex", "vit", "fai", "physPct"],
+    ring: ["dex", "fai", "cdScale", "lifeSteal", "crit", "pickup", "xpPct"]
+  };
+  var AFFIX_LABEL = {
+    str: "\u529B\u91CF",
+    dex: "\u654F\u6377",
+    vit: "\u4F53\u529B",
+    fai: "\u4FE1\u5FC3",
+    maxHp: "\u6700\u5927\u751F\u547D",
+    physPct: "\u7269\u7406\u4F24\u5BB3%",
+    armor: "\u62A4\u7532",
+    crit: "\u66B4\u51FB\u7387%",
+    critDmg: "\u66B4\u51FB\u4F24\u5BB3%",
+    cdScale: "\u653B\u51FB\u901F\u5EA6%",
+    lifeSteal: "\u751F\u547D\u5077\u53D6%",
+    holy: "\u9A71\u90AA\u4F24\u5BB3",
+    xpPct: "\u7ECF\u9A8C\u83B7\u53D6%",
+    pickup: "\u62FE\u53D6\u8303\u56F4"
+  };
+  function affixLabel(stat) {
+    return AFFIX_LABEL[stat];
+  }
+  function rollAffixValue(stat, ilvl) {
+    switch (stat) {
+      case "str":
+      case "dex":
+      case "vit":
+      case "fai":
+        return ri(1, 2 + Math.floor(ilvl / 3));
+      case "maxHp":
+        return ri(5, 10 + ilvl * 2);
+      case "physPct":
+        return ri(3, 6 + Math.floor(ilvl * 1.2));
+      case "armor":
+        return ri(2, 4 + ilvl);
+      case "crit":
+        return ri(2, 3 + Math.floor(ilvl / 2));
+      case "critDmg":
+        return ri(8, 12 + ilvl * 2);
+      case "cdScale":
+        return ri(3, 5 + Math.floor(ilvl / 2));
+      case "lifeSteal":
+        return ri(1, 2 + Math.floor(ilvl / 4));
+      case "holy":
+        return ri(2, 4 + Math.floor(ilvl * 1.2));
+      case "xpPct":
+        return ri(3, 5 + ilvl);
+      case "pickup":
+        return ri(5, 10 + ilvl);
+      default:
+        return 1;
+    }
+  }
+  var _itemSeq = 0;
+  function newId() {
+    _itemSeq += 1;
+    return `it_${_itemSeq}`;
+  }
+  var UNIQUES = {
+    focus: [{
+      name: "\u57FA\u8FF0\xB7\u4F2F\u5229\u6052\u6295\u77F3\u7D22",
+      unique: "\u6295\u77F3\u5FC5\u4E2D\u8981\u5BB3\uFF08\u66B4\u51FB\u7387\u5927\u5E45\u63D0\u5347\uFF09",
+      affixes: [{ stat: "physPct", value: 30 }, { stat: "crit", value: 15 }, { stat: "str", value: 4 }]
+    }],
+    amulet: [{
+      name: "\u8499\u798F\u7684\u8D5E\u7F8E\u62A4\u7B26",
+      unique: "\u9A71\u90AA\u4F24\u5BB3\u663E\u8457\u63D0\u5347",
+      affixes: [{ stat: "holy", value: 12 }, { stat: "fai", value: 6 }, { stat: "critDmg", value: 30 }]
+    }],
+    armor: [{
+      name: "\u78D0\u77F3\u7267\u4EBA\u76AE\u7532",
+      unique: "\u575A\u4E0D\u53EF\u6467\uFF08\u9AD8\u62A4\u7532\u4E0E\u751F\u547D\uFF09",
+      affixes: [{ stat: "armor", value: 30 }, { stat: "maxHp", value: 40 }, { stat: "vit", value: 5 }]
+    }],
+    helm: [{
+      name: "\u5B88\u671B\u8005\u7684\u5934\u5DFE",
+      unique: "\u63D0\u5347\u8B66\u89C9\u4E0E\u751F\u547D",
+      affixes: [{ stat: "vit", value: 5 }, { stat: "armor", value: 15 }, { stat: "maxHp", value: 25 }]
+    }],
+    ring: [{
+      name: "\u4FE1\u5B9E\u7684\u7EA6\u6212",
+      unique: "\u653B\u901F\u4E0E\u751F\u547D\u5077\u53D6",
+      affixes: [{ stat: "cdScale", value: 12 }, { stat: "lifeSteal", value: 4 }, { stat: "dex", value: 4 }]
+    }]
+  };
+  function buildName(slot, rarity) {
+    const noun = SLOT_NOUN[slot];
+    if (rarity === "common")
+      return noun;
+    const q = pick(SLOT_QUALITY[slot]);
+    return `${q}${noun}`;
+  }
+  function rollItem(slot, itemLevel, rarity) {
+    const ilvl = Math.max(1, itemLevel);
+    const reqLevel = Math.max(1, ilvl - 2);
+    const slotArmorK = { armor: 1.5, helm: 1, focus: 0, amulet: 0, ring: 0 };
+    const baseArmor = Math.floor(ilvl * 1.5 * slotArmorK[slot]);
+    if (rarity === "unique") {
+      const table = UNIQUES[slot];
+      if (table && table.length) {
+        const u = pick(table);
+        return {
+          id: newId(),
+          name: u.name,
+          slot,
+          rarity: "unique",
+          itemLevel: ilvl,
+          reqLevel,
+          baseArmor: baseArmor + Math.floor(ilvl * 0.5),
+          affixes: u.affixes.map((a) => ({ ...a })),
+          unique: u.unique
+        };
+      }
+      rarity = "rare";
+    }
+    const meta = RARITY_META[rarity];
+    const count = ri(meta.minAffix, meta.maxAffix);
+    const pool = SLOT_AFFIXES[slot].slice();
+    const affixes = [];
+    for (let i = 0; i < count && pool.length; i++) {
+      const idx = ri(0, pool.length - 1);
+      const stat = pool.splice(idx, 1)[0];
+      affixes.push({ stat, value: rollAffixValue(stat, ilvl) });
+    }
+    return {
+      id: newId(),
+      name: buildName(slot, rarity),
+      slot,
+      rarity,
+      itemLevel: ilvl,
+      reqLevel,
+      baseArmor,
+      affixes
+    };
+  }
+  function clampRarity(r) {
+    return RARITY_ORDER.indexOf(r) >= 0 ? r : "common";
+  }
+  function rollRarity(minTier) {
+    const minIdx = RARITY_ORDER.indexOf(clampRarity(minTier));
+    const roll = Math.random();
+    let idx = minIdx;
+    if (roll > 0.97)
+      idx = Math.max(idx, 3);
+    else if (roll > 0.82)
+      idx = Math.max(idx, 2);
+    else if (roll > 0.5)
+      idx = Math.max(idx, 1);
+    return RARITY_ORDER[Math.min(3, idx)];
+  }
+  function rollLoot(enemy) {
+    if (Math.random() > enemy.lootChance)
+      return null;
+    const slot = pick(["focus", "armor", "helm", "amulet", "ring"]);
+    const rarity = rollRarity(enemy.lootTier);
+    const ilvl = Math.max(1, enemy.level + ri(-1, 2));
+    return rollItem(slot, ilvl, rarity);
+  }
+  function rollChestLoot(level) {
+    const slot = pick(["focus", "armor", "helm", "amulet", "ring"]);
+    const rarity = rollRarity("magic");
+    return rollItem(slot, Math.max(1, level + ri(0, 2)), rarity);
+  }
+
   // assets/scripts/core/GameCore.ts
   var VIEW_W = 800;
   var VIEW_H = 576;
@@ -343,7 +682,14 @@
         atk: 5,
         moving: false,
         animTimer: 0,
-        frame: 0
+        frame: 0,
+        level: 1,
+        xp: 0,
+        attr: defaultAttributes(),
+        equip: emptyEquipment(),
+        bag: [],
+        stamina: 50,
+        maxStamina: 50
       };
       this.input = { left: false, right: false, up: false, down: false, attack: false };
       this.lostSheep = [];
@@ -355,15 +701,25 @@
       this.busy = false;
       this.battles = 0;
       this.questLogOpen = false;
+      this.equipPanelOpen = false;
+      this.bagSel = 0;
       /* ---- 即时战斗 ---- */
       this.weapon = "sling";
       this.attackCD = 0;
       this.projectiles = [];
       this.effects = [];
+      this.popups = [];
       this.enemy = null;
+      // 主线首领（猛狮/邪灵）
+      this.ambient = [];
+      // 游荡小怪
+      this.groundItems = [];
+      this.chests = [];
+      this.ambientEnabled = true;
       this.hintShown = false;
       this.shake = 0;
       this.playerHurt = 0;
+      this.derived = derive(this.player.attr, this.player.equip);
       this.dlg = { active: false, queue: [], current: null, onDone: null };
       this.view = view;
     }
@@ -384,12 +740,16 @@
       this.player.x = ps.c * TILE;
       this.player.y = ps.r * TILE;
       this.player.facing = "down";
-      this.player.hp = GameData.playerStats.maxHp;
-      this.player.maxHp = GameData.playerStats.maxHp;
-      this.player.atk = GameData.playerStats.atk;
       this.player.moving = false;
       this.player.animTimer = 0;
       this.player.frame = 0;
+      this.player.level = 1;
+      this.player.xp = 0;
+      this.player.attr = defaultAttributes();
+      this.player.equip = emptyEquipment();
+      this.player.bag = [];
+      this.recomputeDerived(true);
+      this.player.atk = GameData.playerStats.atk;
       this.lostSheep = GameData.lostSheep.map((s) => ({ ...s, taken: false }));
       this.sheepCollected = 0;
       this.lionActive = false;
@@ -401,22 +761,47 @@
       this.attackCD = 0;
       this.projectiles = [];
       this.effects = [];
+      this.popups = [];
       this.enemy = null;
+      this.ambient = [];
+      this.groundItems = [];
+      this.chests = GameData.chests.map((c) => ({
+        x: c.c * TILE,
+        y: c.r * TILE,
+        level: c.level,
+        opened: false
+      }));
       this.hintShown = false;
       this.shake = 0;
       this.playerHurt = 0;
       this.input = { left: false, right: false, up: false, down: false, attack: false };
       this.dlg = { active: false, queue: [], current: null, onDone: null };
       this.questLogOpen = false;
+      this.equipPanelOpen = false;
+      this.bagSel = 0;
     }
-    /** 每帧推进一次世界（固定步长，与原 Web 版按帧一致）。 */
+    /** 每帧推进一次世界（固定步长）。 */
     update() {
       if (!this.running)
         return;
-      if (this.busy || this.dlg.active || this.questLogOpen)
+      if (this.busy || this.dlg.active || this.questLogOpen || this.equipPanelOpen)
         return;
       this.updatePlayer();
       this.updateCombat();
+    }
+    /* ---------------- 派生属性 ---------------- */
+    recomputeDerived(fullHeal = false) {
+      const prevMax = this.player.maxHp;
+      const d = derive(this.player.attr, this.player.equip);
+      this.derived = d;
+      this.player.maxHp = d.maxHp;
+      this.player.maxStamina = d.maxStamina;
+      if (fullHeal) {
+        this.player.hp = d.maxHp;
+        this.player.stamina = d.maxStamina;
+      } else if (d.maxHp !== prevMax) {
+        this.player.hp = Math.min(d.maxHp, this.player.hp + Math.max(0, d.maxHp - prevMax));
+      }
     }
     /* ---------------- 任务目标文本 ---------------- */
     objectiveText() {
@@ -499,7 +884,6 @@
     currentLine() {
       return this.dlg.current;
     }
-    /** 推进对白；返回 true 表示消费了这次输入 */
     advanceDialogue() {
       if (!this.dlg.active)
         return false;
@@ -561,7 +945,10 @@
       } else {
         this.player.frame = 0;
       }
+      if (this.player.stamina < this.player.maxStamina)
+        this.player.stamina += 0.2;
       this.checkSheepPickup();
+      this.checkLootPickup();
     }
     playerCenter() {
       return { x: this.player.x + TILE / 2, y: this.player.y + TILE / 2 };
@@ -571,6 +958,20 @@
     }
     tileCenter(c, r) {
       return { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 };
+    }
+    /** 渲染/输入层用：当前是否有可战斗的敌人（首领或游荡小怪）。 */
+    combatActive() {
+      return this.allEnemies().length > 0;
+    }
+    /** 当前所有可被攻击/造成接触伤害的敌人（首领 + 游荡小怪）。 */
+    allEnemies() {
+      const list = [];
+      if (this.enemy && !this.enemy.dead)
+        list.push(this.enemy);
+      for (const a of this.ambient)
+        if (!a.dead)
+          list.push(a);
+      return list;
     }
     /* ---------------- 羊：触碰拾取 ---------------- */
     checkSheepPickup() {
@@ -587,6 +988,7 @@
           if (this.sheepCollected >= 3) {
             this.phase = "q1done";
             this.busy = true;
+            this.clearAmbient();
             this.showDialogue(GameData.dialogue.sheepFound, () => {
               this.view.toast("\u4E09\u53EA\u7F8A\u90FD\u627E\u56DE\u6765\u4E86\uFF0C\u56DE\u53BB\u627E\u7236\u4EB2");
               this.busy = false;
@@ -596,25 +998,44 @@
         }
       }
     }
-    /* ---------------- 互动（空格/回车）：仅与父亲耶西对话 ---------------- */
+    /* ---------------- 互动（空格/回车）：父亲对话 / 开宝箱 ---------------- */
     interact() {
       const pc = this.playerCenter();
+      for (const ch of this.chests) {
+        if (ch.opened)
+          continue;
+        if (dist(pc, { x: ch.x + TILE / 2, y: ch.y + TILE / 2 }) < 44) {
+          this.openChest(ch);
+          return;
+        }
+      }
       const jesse2 = GameData.npcs[0];
       if (dist(pc, this.tileCenter(jesse2.c, jesse2.r)) < 52)
         this.talkToJesse();
     }
-    /** 玩家是否站在可与父亲对话的范围内（渲染层用于画交互提示）。 */
     canTalkToJesse() {
       const pc = this.playerCenter();
       const jesse2 = GameData.npcs[0];
       return !this.busy && dist(pc, this.tileCenter(jesse2.c, jesse2.r)) < 52;
+    }
+    /** 玩家附近是否有可开启的宝箱（渲染层画提示用）。 */
+    nearChest() {
+      const pc = this.playerCenter();
+      return this.chests.some((ch) => !ch.opened && dist(pc, { x: ch.x + TILE / 2, y: ch.y + TILE / 2 }) < 44);
+    }
+    openChest(ch) {
+      ch.opened = true;
+      const item = rollChestLoot(ch.level);
+      this.dropItem(ch.x + TILE / 2, ch.y, item);
+      this.view.toast(`\u5B9D\u7BB1\u5F00\u542F\uFF01\u6389\u843D ${rarityName(item.rarity)}\xB7${item.name}`, 1600);
     }
     talkToJesse() {
       this.busy = true;
       if (this.phase === "intro") {
         this.showDialogue(GameData.dialogue.jesseQuest1, () => {
           this.phase = "q1";
-          this.view.toast("\u65B0\u4EFB\u52A1\uFF1A\u627E\u56DE\u8D70\u5931\u7684\u7F8A");
+          this.view.toast("\u65B0\u4EFB\u52A1\uFF1A\u627E\u56DE\u8D70\u5931\u7684\u7F8A\uFF08\u6CBF\u9014\u91CE\u72FC\u53EF\u51FB\u6740\u5237\u7ECF\u9A8C/\u6389\u843D\uFF09");
+          this.spawnAmbient();
           this.busy = false;
         });
       } else if (this.phase === "q1") {
@@ -626,7 +1047,7 @@
           this.phase = "q2";
           this.lionActive = true;
           this.spawnEnemy("lion");
-          this.view.toast("\u5B9E\u65F6\u6218\u6597\uFF1AJ/\u7A7A\u683C \u653B\u51FB \xB7 1/2/3 \u5207\u6362\u6B66\u5668 \xB7 \u53EF\u8FB9\u8DD1\u8FB9\u6253");
+          this.view.toast("\u5B9E\u65F6\u6218\u6597\uFF1AJ/\u7A7A\u683C \u653B\u51FB \xB7 1/2/3 \u5207\u6362\u6B66\u5668 \xB7 C \u67E5\u770B\u88C5\u5907", 2400);
           this.busy = false;
         });
       } else if (this.phase === "q2") {
@@ -639,17 +1060,16 @@
         });
       }
     }
-    /* ---------------- 即时战斗 ---------------- */
-    spawnEnemy(key) {
+    /* ---------------- 敌人生成 ---------------- */
+    makeEnemy(key, c, r, ambient) {
       const def = GameData.enemies[key];
-      const pos = key === "lion" ? GameData.lion : GameData.spirit;
-      this.enemy = {
+      return {
         key,
         name: def.name,
         type: def.type,
         sprite: def.sprite,
-        x: pos.c * TILE,
-        y: pos.r * TILE,
+        x: c * TILE,
+        y: r * TILE,
         hp: def.maxHp,
         maxHp: def.maxHp,
         atk: def.atk,
@@ -658,11 +1078,30 @@
         touchRange: def.touchRange,
         touchMax: def.touchCD,
         touchCD: 0,
-        greeted: false,
+        greeted: ambient,
         dead: false,
-        hurt: 0
+        hurt: 0,
+        level: def.level || 1,
+        xp: def.xp || 0,
+        lootChance: def.lootChance == null ? 0 : def.lootChance,
+        lootTier: def.lootTier || "common",
+        ambient,
+        scale: ambient ? 1.8 : def.sprite === "spirit" ? 2.6 : 3
       };
     }
+    spawnEnemy(key) {
+      const pos = key === "lion" ? GameData.lion : GameData.spirit;
+      this.enemy = this.makeEnemy(key, pos.c, pos.r, false);
+    }
+    spawnAmbient() {
+      if (!this.ambientEnabled)
+        return;
+      this.ambient = GameData.ambientSpawns.map((s) => this.makeEnemy(s.key, s.c, s.r, true));
+    }
+    clearAmbient() {
+      this.ambient = [];
+    }
+    /* ---------------- 武器切换 ---------------- */
     setWeapon(id) {
       if (!this.running || this.busy)
         return;
@@ -677,22 +1116,33 @@
       const i = order.indexOf(this.weapon);
       this.setWeapon(order[(i + 1) % order.length]);
     }
+    /* ---------------- 攻击 ---------------- */
     tryAttack() {
-      if (!this.enemy || this.busy)
+      if (this.allEnemies().length === 0 || this.busy)
         return;
       if (this.attackCD > 0)
         return;
       const wpn = GameData.weapons[this.weapon];
-      this.attackCD = wpn.cd;
+      this.attackCD = Math.round(wpn.cd * this.derived.cdScale);
       const pc = this.playerCenter();
       const dir = facingVec(this.player.facing);
       if (this.weapon === "sling") {
-        this.projectiles.push({
+        this.effects.push({
+          kind: "drawback",
           x: pc.x,
           y: pc.y,
+          life: 8,
+          max: 8,
+          facing: this.player.facing
+        });
+        this.projectiles.push({
+          x: pc.x + dir.x * 14,
+          y: pc.y + dir.y * 14,
           vx: dir.x * wpn.projSpeed,
           vy: dir.y * wpn.projSpeed,
-          life: wpn.projLife
+          life: wpn.projLife,
+          spin: 0,
+          trail: []
         });
       } else if (this.weapon === "staff") {
         this.effects.push({
@@ -703,71 +1153,143 @@
           life: 10,
           max: 10
         });
-        const e = this.enemy;
-        if (e && !e.dead && dist(pc, this.enemyCenter(e)) < wpn.reach)
-          this.damageEnemy(wpn);
+        this.effects.push({
+          kind: "shockwave",
+          x: pc.x + dir.x * 30,
+          y: pc.y + dir.y * 30,
+          facing: this.player.facing,
+          life: 16,
+          max: 16,
+          radius: wpn.reach
+        });
+        for (const e of this.allEnemies()) {
+          if (dist(pc, this.enemyCenter(e)) < wpn.reach)
+            this.damageEnemy(e, wpn);
+        }
       } else if (this.weapon === "harp") {
-        this.effects.push({ kind: "wave", x: pc.x, y: pc.y, life: 28, max: 28, radius: wpn.radius });
-        const e = this.enemy;
-        if (e && !e.dead && dist(pc, this.enemyCenter(e)) < wpn.radius)
-          this.damageEnemy(wpn);
-      }
-    }
-    damageEnemy(wpn) {
-      const e = this.enemy;
-      if (!e || e.dead)
-        return;
-      if (e.type === "spirit") {
-        if (wpn.kind === "harp") {
-          const dmg = rand(wpn.minDmg, wpn.maxDmg);
-          e.hp = Math.max(0, e.hp - dmg);
-          e.hurt = 12;
-          this.shake = 6;
-          this.view.toast(`\u5723\u6D01\u7434\u58F0\u9A71\u90AA\uFF01-${dmg}`, 900);
-        } else {
-          e.hp = Math.max(0, e.hp - 1);
-          e.hurt = 6;
-          if (!this.hintShown) {
-            this.view.toast("\u7269\u7406\u653B\u51FB\u5BF9\u90AA\u7075\u51E0\u4E4E\u65E0\u6548\uFF01\u6539\u7528\u300C\u5F39\u7434\u8D5E\u7F8E\u300D(\u6309 3)", 2200);
-            this.hintShown = true;
-          }
-        }
-      } else {
-        if (wpn.kind === "harp") {
-          e.atk = Math.max(2, e.atk - 1);
-          this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
-          this.view.toast("\u5F39\u7434\u5B89\u629A\uFF0C\u731B\u72EE\u6C14\u52BF\u7A0D\u51CF", 900);
-        } else {
-          const dmg = rand(wpn.minDmg, wpn.maxDmg);
-          e.hp = Math.max(0, e.hp - dmg);
-          e.hurt = 12;
-          this.shake = 6;
+        this.effects.push({ kind: "harpcast", x: pc.x, y: pc.y, life: 14, max: 14 });
+        this.effects.push({ kind: "soundwave", x: pc.x, y: pc.y, life: 34, max: 34, radius: wpn.radius });
+        for (const e of this.allEnemies()) {
+          if (dist(pc, this.enemyCenter(e)) < wpn.radius)
+            this.damageEnemy(e, wpn);
         }
       }
-      if (e.hp <= 0 && !e.dead) {
-        e.dead = true;
-        this.onEnemyDefeated(e.key);
-      }
     }
-    hitPlayer() {
-      const e = this.enemy;
-      if (!e)
+    pushPopup(x, y, text, color, big = false) {
+      this.popups.push({
+        x: x + rand(-6, 6),
+        y,
+        text,
+        color,
+        life: big ? 46 : 38,
+        max: big ? 46 : 38,
+        vy: -0.6
+      });
+    }
+    damageEnemy(e, wpn) {
+      if (e.dead)
         return;
-      const dmg = rand(Math.max(1, e.atk - 1), e.atk + 2);
+      const ec = this.enemyCenter(e);
+      const isHarp = wpn.kind === "harp";
+      if (e.type === "spirit" && !isHarp) {
+        e.hp = Math.max(0, e.hp - 1);
+        e.hurt = 6;
+        this.pushPopup(ec.x, e.y, "\u62B5\u6297 -1", "#9aa0b5");
+        if (!this.hintShown) {
+          this.view.toast("\u7269\u7406\u653B\u51FB\u5BF9\u90AA\u7075\u51E0\u4E4E\u65E0\u6548\uFF01\u6539\u7528\u300C\u5F39\u7434\u8D5E\u7F8E\u300D(\u6309 3)", 2200);
+          this.hintShown = true;
+        }
+        if (e.hp <= 0)
+          this.onEnemyKilled(e);
+        return;
+      }
+      if (e.type === "beast" && isHarp) {
+        e.atk = Math.max(2, e.atk - 1);
+        this.heal(1);
+        this.pushPopup(ec.x, e.y, "\u5B89\u629A", "#ffe27a");
+        return;
+      }
+      const d = this.derived;
+      const kind = isHarp ? "harp" : "phys";
+      const wd = weaponDamage(kind, wpn.minDmg, wpn.maxDmg, d);
+      let dmg = rand(wd.min, wd.max);
+      const crit = Math.random() < d.crit;
+      if (crit)
+        dmg = Math.round(dmg * d.critMult);
+      dmg = Math.max(1, dmg);
+      e.hp = Math.max(0, e.hp - dmg);
+      e.hurt = 12;
+      this.shake = crit ? 9 : 6;
+      const color = isHarp ? "#d6a0ff" : crit ? "#ffd24a" : "#ffffff";
+      this.pushPopup(ec.x, e.y, (crit ? "\u66B4\u51FB " : "") + `-${dmg}`, color, crit);
+      if (crit)
+        this.effects.push({ kind: "critstar", x: ec.x, y: ec.y, life: 12, max: 12 });
+      if (isHarp)
+        this.view.toast(`\u5723\u6D01\u7434\u58F0\u9A71\u90AA\uFF01-${dmg}`, 700);
+      if (d.lifeSteal > 0)
+        this.heal(Math.max(1, Math.floor(dmg * d.lifeSteal)));
+      if (e.hp <= 0 && !e.dead)
+        this.onEnemyKilled(e);
+    }
+    heal(amount) {
+      this.player.hp = Math.min(this.player.maxHp, this.player.hp + amount);
+    }
+    hitPlayer(e) {
+      const d = this.derived;
+      if (Math.random() < d.dodge) {
+        this.pushPopup(this.player.x + TILE / 2, this.player.y, "\u95EA\u907F", "#9aa0b5");
+        return;
+      }
+      let dmg = rand(Math.max(1, e.atk - 1), e.atk + 2);
+      dmg = Math.max(1, Math.round(dmg * (1 - reduction(d.armor, e.level))));
       this.player.hp = Math.max(0, this.player.hp - dmg);
+      this.pushPopup(this.player.x + TILE / 2, this.player.y, `-${dmg}`, "#ff7a7a");
       this.shake = 6;
       this.playerHurt = 12;
       if (this.player.hp <= 0)
         this.playerDown();
     }
-    onEnemyDefeated(key) {
+    /* ---------------- 击杀处理 ---------------- */
+    onEnemyKilled(e) {
+      e.dead = true;
+      this.grantXp(e.xp);
+      const loot = rollLoot(e);
+      if (loot)
+        this.dropItem(e.x + TILE / 2, e.y + TILE / 2, loot);
+      if (e.ambient) {
+        this.ambient = this.ambient.filter((a) => a !== e);
+        return;
+      }
+      this.onBossDefeated(e.key);
+    }
+    grantXp(amount) {
+      if (amount <= 0)
+        return;
+      const gain = Math.round(amount * (1 + this.derived.xpPct));
+      this.player.xp += gain;
+      let leveled = false;
+      while (this.player.xp >= xpToNext(this.player.level)) {
+        this.player.xp -= xpToNext(this.player.level);
+        this.player.level += 1;
+        this.player.attr = levelUpAttributes(this.player.attr, this.player.level);
+        leveled = true;
+      }
+      if (leveled) {
+        this.recomputeDerived(true);
+        const pc = this.playerCenter();
+        this.effects.push({ kind: "levelup", x: pc.x, y: pc.y + 14, life: 30, max: 30 });
+        this.pushPopup(pc.x, this.player.y - 6, `LEVEL UP! Lv.${this.player.level}`, "#ffe27a", true);
+        this.view.toast(`\u5347\u7EA7\uFF01\u7B49\u7EA7 ${this.player.level}\uFF08\u5C5E\u6027\u63D0\u5347\uFF0C\u751F\u547D\u56DE\u6EE1\uFF09`, 1600);
+      }
+    }
+    onBossDefeated(key) {
       this.enemy = null;
       this.projectiles = [];
-      this.effects = [];
       this.busy = true;
       if (key === "lion") {
         this.lionDefeated = true;
         this.lionActive = false;
+        this.clearAmbient();
         this.showDialogue(GameData.dialogue.lionDefeated, () => {
           this.showDialogue(GameData.dialogue.nightFall, () => {
             this.phase = "q3";
@@ -793,7 +1315,6 @@
     playerDown() {
       this.busy = true;
       this.projectiles = [];
-      this.effects = [];
       this.player.hp = this.player.maxHp;
       const e = this.enemy;
       if (e) {
@@ -808,6 +1329,7 @@
         e.greeted = true;
         e.hurt = 0;
       }
+      this.clearAmbient();
       let line;
       if (this.phase === "q3") {
         this.player.x = 9 * TILE;
@@ -824,29 +1346,119 @@
         this.busy = false;
       });
     }
+    /* ---------------- 掉落 / 拾取 ---------------- */
+    dropItem(x, y, item) {
+      const ox = rand(-10, 10);
+      this.groundItems.push({ x: x + ox, y, item, bob: 0 });
+    }
+    checkLootPickup() {
+      const pc = this.playerCenter();
+      const range = this.derived.pickup;
+      for (let i = this.groundItems.length - 1; i >= 0; i--) {
+        const g = this.groundItems[i];
+        if (dist(pc, { x: g.x, y: g.y }) < range) {
+          this.groundItems.splice(i, 1);
+          this.acquireItem(g.item);
+        }
+      }
+    }
+    /** 拾取一件装备：若比当前槽位更优则自动装备，否则进背包。 */
+    acquireItem(item) {
+      const cur = this.player.equip[item.slot];
+      if (scoreItem(item) > scoreItem(cur)) {
+        if (cur)
+          this.player.bag.push(cur);
+        this.player.equip[item.slot] = item;
+        this.recomputeDerived();
+        this.view.toast(`\u5DF2\u88C5\u5907 \xB7 ${rarityName(item.rarity)}\u300C${item.name}\u300D`, 1500);
+      } else {
+        this.player.bag.push(item);
+        this.view.toast(`\u62FE\u53D6 \xB7 ${rarityName(item.rarity)}\u300C${item.name}\u300D(\u5DF2\u5165\u80CC\u5305\uFF0C\u6309 C \u67E5\u770B)`, 1500);
+      }
+    }
+    /* ---------------- 装备面板 ---------------- */
+    toggleEquipPanel() {
+      if (this.dlg.active)
+        return this.equipPanelOpen;
+      this.equipPanelOpen = !this.equipPanelOpen;
+      if (this.equipPanelOpen)
+        this.questLogOpen = false;
+      this.bagSel = 0;
+      return this.equipPanelOpen;
+    }
+    moveBagSel(delta) {
+      if (!this.equipPanelOpen || this.player.bag.length === 0)
+        return;
+      const n = this.player.bag.length;
+      this.bagSel = ((this.bagSel + delta) % n + n) % n;
+    }
+    /** 装备背包中当前选中的物品（替换对应槽位）。 */
+    equipSelected() {
+      if (!this.equipPanelOpen)
+        return;
+      const bag = this.player.bag;
+      if (this.bagSel < 0 || this.bagSel >= bag.length)
+        return;
+      const item = bag[this.bagSel];
+      const cur = this.player.equip[item.slot];
+      bag.splice(this.bagSel, 1);
+      this.player.equip[item.slot] = item;
+      if (cur)
+        bag.push(cur);
+      this.recomputeDerived();
+      if (this.bagSel >= bag.length)
+        this.bagSel = Math.max(0, bag.length - 1);
+      this.view.toast(`\u88C5\u5907 \xB7 ${rarityName(item.rarity)}\u300C${item.name}\u300D`, 1200);
+    }
+    /** 渲染层用：装备物品颜色（按稀有度）。 */
+    itemColor(item) {
+      return rarityColor(item.rarity);
+    }
+    affixText(item) {
+      return item.affixes.map((a) => `  +${a.value} ${affixLabel(a.stat)}`);
+    }
+    slotLabel(slot) {
+      const m = {
+        focus: "\u6B66\u5668\u7126\u70B9",
+        armor: "\u62A4\u7532",
+        helm: "\u5934\u76D4",
+        amulet: "\u62A4\u7B26",
+        ring: "\u6212\u6307"
+      };
+      return m[slot];
+    }
+    /* ---------------- 更新子系统 ---------------- */
     updateProjectiles() {
-      const e = this.enemy;
       const sling = GameData.weapons.sling;
+      const targets = this.allEnemies();
       for (let i = this.projectiles.length - 1; i >= 0; i--) {
         const p = this.projectiles[i];
+        p.trail.push({ x: p.x, y: p.y });
+        if (p.trail.length > 5)
+          p.trail.shift();
         p.x += p.vx;
         p.y += p.vy;
         p.life--;
+        p.spin += 0.4;
         let remove = false;
         if (p.life <= 0 || this.solidAtPixel(p.x, p.y)) {
           remove = true;
-        } else if (e && !e.dead && dist(p, this.enemyCenter(e)) < sling.hitR) {
-          this.damageEnemy(sling);
-          this.effects.push({ kind: "hit", x: p.x, y: p.y, life: 8, max: 8 });
-          remove = true;
+        } else {
+          for (const e of targets) {
+            if (!e.dead && dist(p, this.enemyCenter(e)) < sling.hitR) {
+              this.damageEnemy(e, sling);
+              this.effects.push({ kind: "hit", x: p.x, y: p.y, life: 10, max: 10 });
+              remove = true;
+              break;
+            }
+          }
         }
         if (remove)
           this.projectiles.splice(i, 1);
       }
     }
-    updateEnemy() {
-      const e = this.enemy;
-      if (!e || e.dead)
+    updateEnemyOne(e) {
+      if (e.dead)
         return;
       const pc = this.playerCenter();
       const ec = this.enemyCenter(e);
@@ -873,9 +1485,15 @@
       if (e.touchCD > 0)
         e.touchCD--;
       if (d < e.touchRange && e.touchCD <= 0) {
-        this.hitPlayer();
+        this.hitPlayer(e);
         e.touchCD = e.touchMax;
       }
+    }
+    updateEnemies() {
+      if (this.enemy && !this.enemy.dead)
+        this.updateEnemyOne(this.enemy);
+      for (const a of this.ambient)
+        this.updateEnemyOne(a);
     }
     updateEffects() {
       for (let i = this.effects.length - 1; i >= 0; i--) {
@@ -883,14 +1501,29 @@
           this.effects.splice(i, 1);
       }
     }
+    updatePopups() {
+      for (let i = this.popups.length - 1; i >= 0; i--) {
+        const pp = this.popups[i];
+        pp.y += pp.vy;
+        pp.life--;
+        if (pp.life <= 0)
+          this.popups.splice(i, 1);
+      }
+    }
+    updateGround() {
+      for (const g of this.groundItems)
+        g.bob += 0.12;
+    }
     updateCombat() {
       if (this.attackCD > 0)
         this.attackCD--;
       if (this.input.attack)
         this.tryAttack();
       this.updateProjectiles();
-      this.updateEnemy();
+      this.updateEnemies();
       this.updateEffects();
+      this.updatePopups();
+      this.updateGround();
       if (this.shake > 0)
         this.shake--;
       if (this.playerHurt > 0)
@@ -898,7 +1531,7 @@
     }
     finishChapter() {
       this.running = false;
-      this.view.onFinish({ hp: this.player.hp, maxHp: this.player.maxHp });
+      this.view.onFinish({ hp: this.player.hp, maxHp: this.player.maxHp, level: this.player.level });
     }
     /* ---------------- 输入入口（供渲染层转发） ---------------- */
     setMove(dir, down) {
@@ -907,13 +1540,16 @@
     setAttack(down) {
       this.input.attack = down;
     }
-    /** 空格 / 回车：对白中推进；战斗中无敌人时与父亲对话 */
     confirm() {
       if (this.dlg.active) {
         this.advanceDialogue();
         return;
       }
-      if (this.running && !this.busy && !this.questLogOpen && !this.enemy) {
+      if (this.equipPanelOpen) {
+        this.equipSelected();
+        return;
+      }
+      if (this.running && !this.busy && !this.questLogOpen) {
         this.interact();
       }
     }
@@ -921,6 +1557,8 @@
       if (this.dlg.active)
         return this.questLogOpen;
       this.questLogOpen = !this.questLogOpen;
+      if (this.questLogOpen)
+        this.equipPanelOpen = false;
       return this.questLogOpen;
     }
   };
@@ -1331,23 +1969,12 @@
         const bob = Math.sin(this.animClock * 5) * 2;
         this.text("\u7A7A\u683C/\u70B9\u51FB \u25BC", jesse2.c * TILE - camX + 16, jesse2.r * TILE - camY - 22 + bob, 14, rgba(224, 178, 80), "center", "middle");
       }
-      G.projectiles.forEach((pr) => this.drawProjectile(pr.x - camX, pr.y - camY));
-      if (G.enemy) {
-        const e = G.enemy;
-        const sx = e.x - camX;
-        const sy = e.y - camY;
-        if (e.sprite === "spirit") {
-          const bob = Math.sin(this.animClock * 3.6) * 3;
-          spirit(p, sx - 6, sy - 10 + bob, 2.6, e.hurt > 0);
-        } else {
-          lion(p, sx - 8, sy - 8, 3, e.hurt > 0);
-        }
-        const col = e.type === "spirit" ? rgba(154, 127, 208) : rgba(217, 83, 79);
-        this.nameTag(e.name, sx + 16, sy - 14, col);
-        this.enemyHpBar(sx + 16, sy - 28, e);
-        if (e.hurt > 0)
-          e.hurt--;
-      }
+      this.drawChests(camX, camY);
+      this.drawGroundItems(camX, camY);
+      G.projectiles.forEach((pr) => this.drawProjectile(pr, camX, camY));
+      G.ambient.forEach((e) => this.drawEnemyEntity(e, camX, camY));
+      if (G.enemy)
+        this.drawEnemyEntity(G.enemy, camX, camY);
       this.drawEffects(camX, camY);
       let davidAlpha = 255;
       if (G.playerHurt > 0 && Math.floor(G.playerHurt / 3) % 2 === 0)
@@ -1357,13 +1984,20 @@
         p.fillRect(G.player.x - camX + 14, G.player.y - camY + 2, 20, 30, rgba(120, 30, 40, 90));
       if (G.phase === "q3" && !G.spiritDefeated)
         p.fillRect(0, 0, VIEW_W2, VIEW_H2, rgba(14, 16, 46, 128));
+      this.drawPopups(camX, camY);
+      if (G.nearChest()) {
+        const bob = Math.sin(this.animClock * 5) * 2;
+        this.text("\u7A7A\u683C \u5F00\u542F\u5B9D\u7BB1", G.player.x - camX + 16, G.player.y - camY - 18 + bob, 13, rgba(255, 224, 120), "center", "middle");
+      }
       this.text(`\u76EE\u6807\uFF1A${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));
       this.drawHpBar(G);
-      const showWeapon = !!G.enemy || G.phase === "q2" || G.phase === "q3";
+      this.drawStatsHud(G);
+      const showWeapon = G.combatActive() || G.phase === "q2" || G.phase === "q3";
       if (showWeapon)
         this.drawWeaponHud();
       this.drawDialogue();
       this.drawQuestLog();
+      this.drawEquipPanel();
       if (this.toastTimer > 0)
         this.drawToast();
       if (this.touchUI && !this.finished)
@@ -1380,9 +2014,72 @@
           sheep(this.painter, fx, fy, 1.4);
       }
     }
-    drawProjectile(x, y) {
-      this.painter.fillCircle(x, y, 4, rgba(207, 202, 187));
-      this.painter.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));
+    withAlpha(hex2, a) {
+      const h = Math.max(0, Math.min(255, Math.round(a))).toString(16).padStart(2, "0");
+      return hex2.length === 7 ? hex2 + h : hex2;
+    }
+    drawProjectile(pr, camX, camY) {
+      const p = this.painter;
+      pr.trail.forEach((t, i) => {
+        const a = Math.min(170, 40 + i * 32);
+        p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
+      });
+      const x = pr.x - camX;
+      const y = pr.y - camY;
+      p.fillCircle(x, y, 4, rgba(207, 202, 187));
+      p.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));
+    }
+    drawEnemyEntity(e, camX, camY) {
+      const p = this.painter;
+      const sx = e.x - camX;
+      const sy = e.y - camY;
+      if (e.sprite === "spirit") {
+        const bob = Math.sin(this.animClock * 3.6) * 3;
+        spirit(p, sx - 6, sy - 10 + bob, e.scale, e.hurt > 0);
+      } else {
+        lion(p, sx - 8, sy - 8, e.scale, e.hurt > 0);
+      }
+      const col = e.type === "spirit" ? rgba(154, 127, 208) : e.ambient ? rgba(200, 150, 90) : rgba(217, 83, 79);
+      this.nameTag(`${e.name} Lv.${e.level}`, sx + 16, sy - 14, col);
+      this.enemyHpBar(sx + 16, sy - 28, e);
+      if (e.hurt > 0)
+        e.hurt--;
+    }
+    drawChests(camX, camY) {
+      const p = this.painter;
+      this.core.chests.forEach((ch) => {
+        const x = ch.x - camX;
+        const y = ch.y - camY;
+        if (ch.opened) {
+          p.fillRect(x + 6, y + 18, 20, 10, rgba(90, 60, 30));
+          p.fillRect(x + 6, y + 10, 20, 4, rgba(60, 40, 20));
+        } else {
+          p.fillRect(x + 5, y + 12, 22, 16, rgba(140, 95, 40));
+          p.fillRect(x + 5, y + 10, 22, 5, rgba(170, 120, 55));
+          p.fillRect(x + 14, y + 12, 4, 16, rgba(220, 190, 90));
+          p.fillRect(x + 5, y + 18, 22, 2, rgba(90, 60, 25));
+        }
+      });
+    }
+    drawGroundItems(camX, camY) {
+      const p = this.painter;
+      this.core.groundItems.forEach((g) => {
+        const x = g.x - camX;
+        const y = g.y - camY;
+        const col = this.core.itemColor(g.item);
+        const bob = Math.sin(g.bob) * 3;
+        p.fillRect(x - 2, y - 30, 4, 30, this.withAlpha(col, 70));
+        p.fillCircle(x, y + bob, 5, col);
+        p.fillCircle(x, y + bob, 2, rgba(255, 255, 255, 220));
+      });
+    }
+    drawPopups(camX, camY) {
+      this.core.popups.forEach((pp) => {
+        const t = pp.life / pp.max;
+        const a = Math.round(255 * Math.min(1, t * 1.4));
+        const size = pp.text.indexOf("LEVEL") >= 0 || pp.text.indexOf("\u66B4\u51FB") >= 0 ? 16 : 14;
+        this.text(pp.text, pp.x - camX, pp.y - camY, size, this.withAlpha(pp.color, a), "center", "middle");
+      });
     }
     drawEffects(camX, camY) {
       const p = this.painter;
@@ -1404,8 +2101,140 @@
             const ang = i * Math.PI / 2 + (1 - t);
             p.fillRect(x + Math.cos(ang) * 8 - 1, y + Math.sin(ang) * 8 - 1, 3, 3, rgba(255, 242, 192, a));
           }
+        } else if (fx.kind === "drawback") {
+          const a = Math.round(230 * t);
+          const dx = fx.facing === "left" ? -1 : fx.facing === "right" ? 1 : 0;
+          const dy = fx.facing === "up" ? -1 : fx.facing === "down" ? 1 : 0;
+          const bx = x - dx * 10;
+          const by = y - dy * 10;
+          const base = fx.facing === "left" ? Math.PI : fx.facing === "right" ? 0 : fx.facing === "up" ? -Math.PI / 2 : Math.PI / 2;
+          p.strokeArc(x + dx * 4, y + dy * 4, 9, base + Math.PI / 2, base + Math.PI * 1.5, 2, rgba(230, 220, 190, a));
+          p.fillCircle(bx, by, 3, rgba(190, 184, 165, a));
+        } else if (fx.kind === "shockwave") {
+          const prog = 1 - t;
+          const rr = (fx.radius || 40) * (0.3 + prog);
+          const base = fx.facing === "left" ? Math.PI : fx.facing === "right" ? 0 : fx.facing === "up" ? -Math.PI / 2 : Math.PI / 2;
+          const a = Math.round(200 * t);
+          p.strokeArc(x, y, rr, base - 0.9, base + 0.9, 4, rgba(180, 220, 255, a));
+          p.strokeArc(x, y, rr * 0.72, base - 0.8, base + 0.8, 2, rgba(232, 246, 255, a));
+        } else if (fx.kind === "harpcast") {
+          const a = Math.round(170 * t);
+          p.fillCircle(x, y, 18 * (1 - t) + 6, rgba(255, 226, 140, Math.round(a * 0.5)));
+          p.strokeCircle(x, y, 22 * (1 - t) + 8, 3, rgba(255, 240, 190, a));
+        } else if (fx.kind === "soundwave") {
+          const R = fx.radius || 120;
+          for (let k = 0; k < 3; k++) {
+            const phase = t - k * 0.18;
+            if (phase <= 0 || phase > 1)
+              continue;
+            const rr = (1 - phase) * R;
+            p.strokeCircle(x, y, rr, 3, rgba(255, 226, 122, Math.round(200 * phase)));
+          }
+          const notes = 6;
+          for (let i = 0; i < notes; i++) {
+            const ang = i * (Math.PI * 2 / notes) + (1 - t) * 1.2;
+            const rr = (1 - t) * R * 0.8;
+            const nx = x + Math.cos(ang) * rr;
+            const ny = y + Math.sin(ang) * rr - (1 - t) * 10;
+            const a = Math.round(230 * t);
+            p.fillCircle(nx, ny, 3, rgba(255, 245, 200, a));
+            p.fillRect(nx + 2, ny - 10, 2, 10, rgba(255, 245, 200, a));
+          }
+        } else if (fx.kind === "critstar") {
+          const a = Math.round(255 * t);
+          const R = 10 + (1 - t) * 12;
+          for (let i = 0; i < 8; i++) {
+            const ang = i * Math.PI / 4;
+            p.fillRect(x + Math.cos(ang) * R - 1, y + Math.sin(ang) * R - 1, 3, 3, rgba(255, 224, 90, a));
+          }
+        } else if (fx.kind === "levelup") {
+          const a = Math.round(220 * t);
+          const rr = (1 - t) * 42;
+          p.strokeCircle(x, y, rr, 4, rgba(255, 226, 120, a));
+          p.strokeCircle(x, y, rr * 0.6, 2, rgba(255, 250, 210, a));
         }
       });
+    }
+    drawStatsHud(G) {
+      const x = 10;
+      const need = 20 + G.player.level * 15;
+      this.text(`Lv.${G.player.level}`, x, 52, 13, rgba(255, 226, 120), "left", "middle");
+      const xb = x + 44;
+      const xw = 116;
+      const xy = 49;
+      this.painter.fillRect(xb, xy, xw, 6, rgba(40, 40, 50));
+      this.painter.fillRect(xb, xy, xw * Math.min(1, G.player.xp / need), 6, rgba(120, 200, 255));
+      const a = G.player.attr;
+      const d = G.derived;
+      this.text(
+        `\u529B${a.str} \u654F${a.dex} \u4F53${a.vit} \u4FE1${a.fai}  \u62A4\u7532${d.armor} \u66B4\u51FB${Math.round(d.crit * 100)}%`,
+        x,
+        68,
+        12,
+        rgba(214, 210, 196)
+      );
+    }
+    drawEquipPanel() {
+      if (!this.core.equipPanelOpen)
+        return;
+      const G = this.core;
+      const p = this.painter;
+      const w = 580;
+      const h = 400;
+      const x = (VIEW_W2 - w) / 2;
+      const y = (VIEW_H2 - h) / 2;
+      p.fillRect(x, y, w, h, rgba(14, 11, 22, 236));
+      p.fillRect(x, y, w, 3, rgba(224, 178, 80));
+      this.text("\u88C5\u5907 / \u89D2\u8272\uFF08C \u5173\u95ED \xB7 \u2191\u2193 \u9009\u62E9\u80CC\u5305 \xB7 \u56DE\u8F66/\u7A7A\u683C \u88C5\u5907\uFF09", x + 16, y + 12, 15, rgba(255, 215, 102));
+      const slots = ["focus", "armor", "helm", "amulet", "ring"];
+      let sy = y + 46;
+      slots.forEach((s) => {
+        const it = G.player.equip[s];
+        this.text(`${G.slotLabel(s)}\uFF1A`, x + 16, sy, 14, rgba(207, 198, 184));
+        if (it)
+          this.text(it.name, x + 110, sy, 14, G.itemColor(it));
+        else
+          this.text("\u2014", x + 110, sy, 14, rgba(120, 120, 130));
+        sy += 24;
+      });
+      const a = G.player.attr;
+      const d = G.derived;
+      let ry = y + 46;
+      const rx = x + 310;
+      const lines = [
+        `\u7B49\u7EA7 Lv.${G.player.level}   \u7ECF\u9A8C ${G.player.xp}/${20 + G.player.level * 15}`,
+        `\u529B\u91CF STR ${a.str}    \u654F\u6377 DEX ${a.dex}`,
+        `\u4F53\u529B VIT ${a.vit}    \u4FE1\u5FC3 FAI ${a.fai}`,
+        `\u751F\u547D ${Math.round(G.player.hp)}/${d.maxHp}`,
+        `\u7269\u653B x${d.physMul.toFixed(2)}   \u9A71\u90AA x${d.holyMul.toFixed(2)}`,
+        `\u62A4\u7532 ${d.armor}  \u66B4\u51FB ${Math.round(d.crit * 100)}%  \u66B4\u4F24 ${Math.round(d.critMult * 100)}%`,
+        `\u95EA\u907F ${Math.round(d.dodge * 100)}%  \u653B\u901F +${Math.round((1 - d.cdScale) * 100)}%`
+      ];
+      lines.forEach((ln) => {
+        this.text(ln, rx, ry, 13, rgba(214, 210, 196));
+        ry += 22;
+      });
+      const by = y + 188;
+      this.text(`\u80CC\u5305\uFF08${G.player.bag.length}\uFF09`, x + 16, by, 14, rgba(255, 215, 102));
+      const listY = by + 24;
+      const rowH = 22;
+      const maxRows = 8;
+      if (G.player.bag.length === 0) {
+        this.text("\uFF08\u7A7A\uFF09\u62FE\u53D6/\u5F00\u5B9D\u7BB1\u83B7\u5F97\u7684\u88C5\u5907\u4F1A\u51FA\u73B0\u5728\u8FD9\u91CC", x + 18, listY, 13, rgba(150, 150, 160));
+        return;
+      }
+      const start = Math.max(0, Math.min(G.bagSel - 3, G.player.bag.length - maxRows));
+      for (let i = 0; i < maxRows; i++) {
+        const idx = start + i;
+        if (idx >= G.player.bag.length)
+          break;
+        const it = G.player.bag[idx];
+        const ly = listY + i * rowH;
+        if (idx === G.bagSel)
+          p.fillRect(x + 12, ly - 2, w - 24, rowH, rgba(80, 70, 40, 150));
+        this.text(`${G.slotLabel(it.slot)} \xB7 ${it.name}`, x + 18, ly, 13, G.itemColor(it));
+        this.text(G.affixText(it).join("  ").trim(), x + 250, ly, 12, rgba(190, 186, 172));
+      }
     }
     nameTag(text, cx, cy, color) {
       const w = text.length * 12 + 8;
@@ -1535,6 +2364,30 @@ ${lines.join("\n")}`, x + 16, y + 14, 15, rgba(244, 236, 216), w - 32);
     /* ---------------- 输入：键盘 ---------------- */
     keyDown(key) {
       const c = this.core;
+      if (c.equipPanelOpen) {
+        switch (key) {
+          case "c":
+          case "C":
+            c.toggleEquipPanel();
+            return;
+          case "ArrowUp":
+          case "w":
+          case "W":
+            c.moveBagSel(-1);
+            return;
+          case "ArrowDown":
+          case "s":
+          case "S":
+            c.moveBagSel(1);
+            return;
+          case "Enter":
+          case " ":
+            c.equipSelected();
+            return;
+          default:
+            return;
+        }
+      }
       switch (key) {
         case "ArrowLeft":
         case "a":
@@ -1561,6 +2414,10 @@ ${lines.join("\n")}`, x + 16, y + 14, 15, rgba(244, 236, 216), w - 32);
         case " ":
         case "Enter":
           this.pressAttackOrConfirm();
+          return;
+        case "c":
+        case "C":
+          c.toggleEquipPanel();
           return;
         case "1":
           c.setWeapon("sling");
@@ -1631,7 +2488,7 @@ ${lines.join("\n")}`, x + 16, y + 14, 15, rgba(244, 236, 216), w - 32);
         c.advanceDialogue();
         return;
       }
-      if (c.enemy && c.running && !c.busy) {
+      if (c.combatActive() && c.running && !c.busy) {
         c.setAttack(true);
         return;
       }
@@ -1661,7 +2518,7 @@ ${lines.join("\n")}`, x + 16, y + 14, 15, rgba(244, 236, 216), w - 32);
       }
       if (this.inBtn(this.atkBtn(), x, y)) {
         this.atkId = id;
-        if (c.enemy && c.running && !c.busy)
+        if (c.combatActive() && c.running && !c.busy)
           c.setAttack(true);
         else
           c.confirm();

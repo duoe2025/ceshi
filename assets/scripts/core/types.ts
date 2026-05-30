@@ -47,6 +47,66 @@ export interface WeaponDef {
   maxDmg: number;
 }
 
+export type Rarity = 'common' | 'magic' | 'rare' | 'unique';
+export type Slot = 'focus' | 'armor' | 'helm' | 'amulet' | 'ring';
+export type AffixStat =
+  | 'str' | 'dex' | 'vit' | 'fai'
+  | 'maxHp' | 'physPct' | 'armor' | 'crit' | 'critDmg'
+  | 'cdScale' | 'lifeSteal' | 'holy' | 'xpPct' | 'pickup';
+
+export interface Attributes { str: number; dex: number; vit: number; fai: number; }
+
+export interface DerivedStats {
+  maxHp: number;
+  maxStamina: number;
+  physMul: number; // 物理伤害乘数（来自 STR）
+  holyMul: number; // 驱邪伤害乘数（来自 FAI）
+  physFlat: number; // 装备 +物理% 折算
+  holyFlat: number; // 装备 +驱邪
+  armor: number;
+  crit: number;
+  critMult: number;
+  dodge: number;
+  cdScale: number; // 攻击冷却乘数（<1 更快）
+  lifeSteal: number;
+  xpPct: number;
+  pickup: number; // 拾取半径
+}
+
+export interface Affix { stat: AffixStat; value: number; }
+
+export interface Item {
+  id: string;
+  name: string;
+  slot: Slot;
+  rarity: Rarity;
+  itemLevel: number;
+  reqLevel: number;
+  baseArmor: number;
+  affixes: Affix[];
+  unique?: string;
+}
+
+export interface Equipment {
+  focus: Item | null;
+  armor: Item | null;
+  helm: Item | null;
+  amulet: Item | null;
+  ring: Item | null;
+}
+
+export interface GroundItem { x: number; y: number; item: Item; bob: number; }
+
+export interface Popup {
+  x: number;
+  y: number;
+  text: string;
+  color: string;
+  life: number;
+  max: number;
+  vy: number;
+}
+
 export interface EnemyDef {
   name: string;
   type: 'beast' | 'spirit';
@@ -58,6 +118,10 @@ export interface EnemyDef {
   touchRange: number;
   sprite: string;
   attackName: string;
+  level?: number;
+  xp?: number;
+  lootChance?: number; // 0-1，掉落概率（首领必掉=1）
+  lootTier?: Rarity; // 掉落最低稀有度
 }
 
 export interface Enemy {
@@ -78,6 +142,12 @@ export interface Enemy {
   greeted: boolean;
   dead: boolean;
   hurt: number;
+  level: number;
+  xp: number;
+  lootChance: number;
+  lootTier: Rarity;
+  ambient: boolean; // true=游荡小怪（非主线首领）
+  scale: number; // 渲染缩放
 }
 
 export interface Projectile {
@@ -86,10 +156,17 @@ export interface Projectile {
   vx: number;
   vy: number;
   life: number;
+  spin: number;
+  trail: Array<{ x: number; y: number }>;
 }
 
+export type EffectKind =
+  | 'slash' | 'wave' | 'hit'
+  | 'drawback' | 'shockwave' | 'harpcast' | 'soundwave'
+  | 'critstar' | 'levelup';
+
 export interface Effect {
-  kind: 'slash' | 'wave' | 'hit';
+  kind: EffectKind;
   x: number;
   y: number;
   life: number;
@@ -108,6 +185,13 @@ export interface Player {
   moving: boolean;
   animTimer: number;
   frame: number;
+  level: number;
+  xp: number;
+  attr: Attributes;
+  equip: Equipment;
+  bag: Item[];
+  stamina: number;
+  maxStamina: number;
 }
 
 export interface QuestEntry {
@@ -120,6 +204,7 @@ export interface QuestEntry {
 export interface FinishStats {
   hp: number;
   maxHp: number;
+  level: number;
 }
 
 /** 视图回调：核心逻辑通过它向渲染层发出瞬时事件（提示气泡 / 通关）。 */

@@ -6,7 +6,7 @@
 
 import { GameCore } from '../core/GameCore';
 import { GameData, TILE, MAP_COLS, MAP_ROWS } from '../core/GameData';
-import { FinishStats, IGameView } from '../core/types';
+import { FinishStats, IGameView, Slot } from '../core/types';
 import { CanvasPainter, Ctx2D, cssColor } from './CanvasPainter';
 import * as Sprites from '../Sprites';
 import { rgba } from '../IPainter';
@@ -174,22 +174,13 @@ export class CanvasGame implements IGameView {
       this.text('空格/点击 ▼', jesse.c * TILE - camX + 16, jesse.r * TILE - camY - 22 + bob, 14, rgba(224, 178, 80), 'center', 'middle');
     }
 
-    G.projectiles.forEach((pr) => this.drawProjectile(pr.x - camX, pr.y - camY));
+    this.drawChests(camX, camY);
+    this.drawGroundItems(camX, camY);
 
-    if (G.enemy) {
-      const e = G.enemy;
-      const sx = e.x - camX; const sy = e.y - camY;
-      if (e.sprite === 'spirit') {
-        const bob = Math.sin(this.animClock * 3.6) * 3;
-        Sprites.spirit(p, sx - 6, sy - 10 + bob, 2.6, e.hurt > 0);
-      } else {
-        Sprites.lion(p, sx - 8, sy - 8, 3, e.hurt > 0);
-      }
-      const col = e.type === 'spirit' ? rgba(154, 127, 208) : rgba(217, 83, 79);
-      this.nameTag(e.name, sx + 16, sy - 14, col);
-      this.enemyHpBar(sx + 16, sy - 28, e);
-      if (e.hurt > 0) e.hurt--;
-    }
+    G.projectiles.forEach((pr) => this.drawProjectile(pr, camX, camY));
+
+    G.ambient.forEach((e) => this.drawEnemyEntity(e, camX, camY));
+    if (G.enemy) this.drawEnemyEntity(G.enemy, camX, camY);
 
     this.drawEffects(camX, camY);
 
@@ -200,14 +191,23 @@ export class CanvasGame implements IGameView {
 
     if (G.phase === 'q3' && !G.spiritDefeated) p.fillRect(0, 0, VIEW_W, VIEW_H, rgba(14, 16, 46, 128));
 
+    this.drawPopups(camX, camY);
+
+    if (G.nearChest()) {
+      const bob = Math.sin(this.animClock * 5) * 2;
+      this.text('空格 开启宝箱', G.player.x - camX + 16, G.player.y - camY - 18 + bob, 13, rgba(255, 224, 120), 'center', 'middle');
+    }
+
     // HUD
     this.text(`目标：${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));
     this.drawHpBar(G);
-    const showWeapon = !!G.enemy || G.phase === 'q2' || G.phase === 'q3';
+    this.drawStatsHud(G);
+    const showWeapon = G.combatActive() || G.phase === 'q2' || G.phase === 'q3';
     if (showWeapon) this.drawWeaponHud();
 
     this.drawDialogue();
     this.drawQuestLog();
+    this.drawEquipPanel();
     if (this.toastTimer > 0) this.drawToast();
     if (this.touchUI && !this.finished) this.drawTouchControls();
     if (this.finished) this.drawEnd();
@@ -222,9 +222,73 @@ export class CanvasGame implements IGameView {
     }
   }
 
-  private drawProjectile(x: number, y: number): void {
-    this.painter.fillCircle(x, y, 4, rgba(207, 202, 187));
-    this.painter.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));
+  private withAlpha(hex: string, a: number): string {
+    const h = Math.max(0, Math.min(255, Math.round(a))).toString(16).padStart(2, '0');
+    return hex.length === 7 ? hex + h : hex;
+  }
+
+  private drawProjectile(pr: { x: number; y: number; trail: Array<{ x: number; y: number }> }, camX: number, camY: number): void {
+    const p = this.painter;
+    pr.trail.forEach((t, i) => {
+      const a = Math.min(170, 40 + i * 32);
+      p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
+    });
+    const x = pr.x - camX; const y = pr.y - camY;
+    p.fillCircle(x, y, 4, rgba(207, 202, 187));
+    p.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));
+  }
+
+  private drawEnemyEntity(e: import('../core/types').Enemy, camX: number, camY: number): void {
+    const p = this.painter;
+    const sx = e.x - camX; const sy = e.y - camY;
+    if (e.sprite === 'spirit') {
+      const bob = Math.sin(this.animClock * 3.6) * 3;
+      Sprites.spirit(p, sx - 6, sy - 10 + bob, e.scale, e.hurt > 0);
+    } else {
+      Sprites.lion(p, sx - 8, sy - 8, e.scale, e.hurt > 0);
+    }
+    const col = e.type === 'spirit' ? rgba(154, 127, 208)
+      : (e.ambient ? rgba(200, 150, 90) : rgba(217, 83, 79));
+    this.nameTag(`${e.name} Lv.${e.level}`, sx + 16, sy - 14, col);
+    this.enemyHpBar(sx + 16, sy - 28, e);
+    if (e.hurt > 0) e.hurt--;
+  }
+
+  private drawChests(camX: number, camY: number): void {
+    const p = this.painter;
+    this.core.chests.forEach((ch) => {
+      const x = ch.x - camX; const y = ch.y - camY;
+      if (ch.opened) {
+        p.fillRect(x + 6, y + 18, 20, 10, rgba(90, 60, 30));
+        p.fillRect(x + 6, y + 10, 20, 4, rgba(60, 40, 20));
+      } else {
+        p.fillRect(x + 5, y + 12, 22, 16, rgba(140, 95, 40));
+        p.fillRect(x + 5, y + 10, 22, 5, rgba(170, 120, 55));
+        p.fillRect(x + 14, y + 12, 4, 16, rgba(220, 190, 90));
+        p.fillRect(x + 5, y + 18, 22, 2, rgba(90, 60, 25));
+      }
+    });
+  }
+
+  private drawGroundItems(camX: number, camY: number): void {
+    const p = this.painter;
+    this.core.groundItems.forEach((g) => {
+      const x = g.x - camX; const y = g.y - camY;
+      const col = this.core.itemColor(g.item);
+      const bob = Math.sin(g.bob) * 3;
+      p.fillRect(x - 2, y - 30, 4, 30, this.withAlpha(col, 70));
+      p.fillCircle(x, y + bob, 5, col);
+      p.fillCircle(x, y + bob, 2, rgba(255, 255, 255, 220));
+    });
+  }
+
+  private drawPopups(camX: number, camY: number): void {
+    this.core.popups.forEach((pp) => {
+      const t = pp.life / pp.max;
+      const a = Math.round(255 * Math.min(1, t * 1.4));
+      const size = (pp.text.indexOf('LEVEL') >= 0 || pp.text.indexOf('暴击') >= 0) ? 16 : 14;
+      this.text(pp.text, pp.x - camX, pp.y - camY, size, this.withAlpha(pp.color, a), 'center', 'middle');
+    });
   }
 
   private drawEffects(camX: number, camY: number): void {
@@ -247,8 +311,115 @@ export class CanvasGame implements IGameView {
           const ang = i * Math.PI / 2 + (1 - t);
           p.fillRect(x + Math.cos(ang) * 8 - 1, y + Math.sin(ang) * 8 - 1, 3, 3, rgba(255, 242, 192, a));
         }
+      } else if (fx.kind === 'drawback') {
+        // 弹弓蓄力：朝向后方被拉出的石子 + V 形皮带
+        const a = Math.round(230 * t);
+        const dx = fx.facing === 'left' ? -1 : fx.facing === 'right' ? 1 : 0;
+        const dy = fx.facing === 'up' ? -1 : fx.facing === 'down' ? 1 : 0;
+        const bx = x - dx * 10; const by = y - dy * 10;
+        const base = fx.facing === 'left' ? Math.PI : fx.facing === 'right' ? 0
+          : fx.facing === 'up' ? -Math.PI / 2 : Math.PI / 2;
+        p.strokeArc(x + dx * 4, y + dy * 4, 9, base + Math.PI / 2, base + Math.PI * 1.5, 2, rgba(230, 220, 190, a));
+        p.fillCircle(bx, by, 3, rgba(190, 184, 165, a));
+      } else if (fx.kind === 'shockwave') {
+        // 外推的半月冲击波扇
+        const prog = 1 - t; const rr = (fx.radius || 40) * (0.3 + prog);
+        const base = fx.facing === 'left' ? Math.PI : fx.facing === 'right' ? 0
+          : fx.facing === 'up' ? -Math.PI / 2 : Math.PI / 2;
+        const a = Math.round(200 * t);
+        p.strokeArc(x, y, rr, base - 0.9, base + 0.9, 4, rgba(180, 220, 255, a));
+        p.strokeArc(x, y, rr * 0.72, base - 0.8, base + 0.8, 2, rgba(232, 246, 255, a));
+      } else if (fx.kind === 'harpcast') {
+        const a = Math.round(170 * t);
+        p.fillCircle(x, y, 18 * (1 - t) + 6, rgba(255, 226, 140, Math.round(a * 0.5)));
+        p.strokeCircle(x, y, 22 * (1 - t) + 8, 3, rgba(255, 240, 190, a));
+      } else if (fx.kind === 'soundwave') {
+        const R = fx.radius || 120;
+        for (let k = 0; k < 3; k++) {
+          const phase = t - k * 0.18;
+          if (phase <= 0 || phase > 1) continue;
+          const rr = (1 - phase) * R;
+          p.strokeCircle(x, y, rr, 3, rgba(255, 226, 122, Math.round(200 * phase)));
+        }
+        const notes = 6;
+        for (let i = 0; i < notes; i++) {
+          const ang = i * (Math.PI * 2 / notes) + (1 - t) * 1.2;
+          const rr = (1 - t) * R * 0.8;
+          const nx = x + Math.cos(ang) * rr; const ny = y + Math.sin(ang) * rr - (1 - t) * 10;
+          const a = Math.round(230 * t);
+          p.fillCircle(nx, ny, 3, rgba(255, 245, 200, a));
+          p.fillRect(nx + 2, ny - 10, 2, 10, rgba(255, 245, 200, a));
+        }
+      } else if (fx.kind === 'critstar') {
+        const a = Math.round(255 * t); const R = 10 + (1 - t) * 12;
+        for (let i = 0; i < 8; i++) {
+          const ang = i * Math.PI / 4;
+          p.fillRect(x + Math.cos(ang) * R - 1, y + Math.sin(ang) * R - 1, 3, 3, rgba(255, 224, 90, a));
+        }
+      } else if (fx.kind === 'levelup') {
+        const a = Math.round(220 * t); const rr = (1 - t) * 42;
+        p.strokeCircle(x, y, rr, 4, rgba(255, 226, 120, a));
+        p.strokeCircle(x, y, rr * 0.6, 2, rgba(255, 250, 210, a));
       }
     });
+  }
+
+  private drawStatsHud(G: GameCore): void {
+    const x = 10;
+    const need = 20 + G.player.level * 15;
+    this.text(`Lv.${G.player.level}`, x, 52, 13, rgba(255, 226, 120), 'left', 'middle');
+    const xb = x + 44; const xw = 116; const xy = 49;
+    this.painter.fillRect(xb, xy, xw, 6, rgba(40, 40, 50));
+    this.painter.fillRect(xb, xy, xw * Math.min(1, G.player.xp / need), 6, rgba(120, 200, 255));
+    const a = G.player.attr; const d = G.derived;
+    this.text(`力${a.str} 敏${a.dex} 体${a.vit} 信${a.fai}  护甲${d.armor} 暴击${Math.round(d.crit * 100)}%`,
+      x, 68, 12, rgba(214, 210, 196));
+  }
+
+  private drawEquipPanel(): void {
+    if (!this.core.equipPanelOpen) return;
+    const G = this.core; const p = this.painter;
+    const w = 580; const h = 400; const x = (VIEW_W - w) / 2; const y = (VIEW_H - h) / 2;
+    p.fillRect(x, y, w, h, rgba(14, 11, 22, 236));
+    p.fillRect(x, y, w, 3, rgba(224, 178, 80));
+    this.text('装备 / 角色（C 关闭 · ↑↓ 选择背包 · 回车/空格 装备）', x + 16, y + 12, 15, rgba(255, 215, 102));
+    const slots: Slot[] = ['focus', 'armor', 'helm', 'amulet', 'ring'];
+    let sy = y + 46;
+    slots.forEach((s) => {
+      const it = G.player.equip[s];
+      this.text(`${G.slotLabel(s)}：`, x + 16, sy, 14, rgba(207, 198, 184));
+      if (it) this.text(it.name, x + 110, sy, 14, G.itemColor(it));
+      else this.text('—', x + 110, sy, 14, rgba(120, 120, 130));
+      sy += 24;
+    });
+    const a = G.player.attr; const d = G.derived; let ry = y + 46; const rx = x + 310;
+    const lines = [
+      `等级 Lv.${G.player.level}   经验 ${G.player.xp}/${20 + G.player.level * 15}`,
+      `力量 STR ${a.str}    敏捷 DEX ${a.dex}`,
+      `体力 VIT ${a.vit}    信心 FAI ${a.fai}`,
+      `生命 ${Math.round(G.player.hp)}/${d.maxHp}`,
+      `物攻 x${d.physMul.toFixed(2)}   驱邪 x${d.holyMul.toFixed(2)}`,
+      `护甲 ${d.armor}  暴击 ${Math.round(d.crit * 100)}%  暴伤 ${Math.round(d.critMult * 100)}%`,
+      `闪避 ${Math.round(d.dodge * 100)}%  攻速 +${Math.round((1 - d.cdScale) * 100)}%`,
+    ];
+    lines.forEach((ln) => { this.text(ln, rx, ry, 13, rgba(214, 210, 196)); ry += 22; });
+    const by = y + 188;
+    this.text(`背包（${G.player.bag.length}）`, x + 16, by, 14, rgba(255, 215, 102));
+    const listY = by + 24; const rowH = 22; const maxRows = 8;
+    if (G.player.bag.length === 0) {
+      this.text('（空）拾取/开宝箱获得的装备会出现在这里', x + 18, listY, 13, rgba(150, 150, 160));
+      return;
+    }
+    const start = Math.max(0, Math.min(G.bagSel - 3, G.player.bag.length - maxRows));
+    for (let i = 0; i < maxRows; i++) {
+      const idx = start + i;
+      if (idx >= G.player.bag.length) break;
+      const it = G.player.bag[idx];
+      const ly = listY + i * rowH;
+      if (idx === G.bagSel) p.fillRect(x + 12, ly - 2, w - 24, rowH, rgba(80, 70, 40, 150));
+      this.text(`${G.slotLabel(it.slot)} · ${it.name}`, x + 18, ly, 13, G.itemColor(it));
+      this.text(G.affixText(it).join('  ').trim(), x + 250, ly, 12, rgba(190, 186, 172));
+    }
   }
 
   private nameTag(text: string, cx: number, cy: number, color: string): void {
@@ -363,12 +534,22 @@ export class CanvasGame implements IGameView {
   /* ---------------- 输入：键盘 ---------------- */
   keyDown(key: string): void {
     const c = this.core;
+    if (c.equipPanelOpen) {
+      switch (key) {
+        case 'c': case 'C': c.toggleEquipPanel(); return;
+        case 'ArrowUp': case 'w': case 'W': c.moveBagSel(-1); return;
+        case 'ArrowDown': case 's': case 'S': c.moveBagSel(1); return;
+        case 'Enter': case ' ': c.equipSelected(); return;
+        default: return;
+      }
+    }
     switch (key) {
       case 'ArrowLeft': case 'a': case 'A': c.setMove('left', true); return;
       case 'ArrowRight': case 'd': case 'D': c.setMove('right', true); return;
       case 'ArrowUp': case 'w': case 'W': c.setMove('up', true); return;
       case 'ArrowDown': case 's': case 'S': c.setMove('down', true); return;
       case 'j': case 'J': case ' ': case 'Enter': this.pressAttackOrConfirm(); return;
+      case 'c': case 'C': c.toggleEquipPanel(); return;
       case '1': c.setWeapon('sling'); return;
       case '2': c.setWeapon('staff'); return;
       case '3': c.setWeapon('harp'); return;
@@ -395,7 +576,7 @@ export class CanvasGame implements IGameView {
     const c = this.core;
     if (this.finished) { this.start(); return; }
     if (c.dialogueActive()) { c.advanceDialogue(); return; }
-    if (c.enemy && c.running && !c.busy) { c.setAttack(true); return; }
+    if (c.combatActive() && c.running && !c.busy) { c.setAttack(true); return; }
     c.confirm();
   }
 
@@ -411,7 +592,7 @@ export class CanvasGame implements IGameView {
     }
     if (this.inBtn(this.atkBtn(), x, y)) {
       this.atkId = id;
-      if (c.enemy && c.running && !c.busy) c.setAttack(true); else c.confirm();
+      if (c.combatActive() && c.running && !c.busy) c.setAttack(true); else c.confirm();
       return;
     }
     // 否则当作摇杆

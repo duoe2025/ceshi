@@ -1,17 +1,23 @@
 /* ============================================================
  * GameCore.ts — 牧童大卫 第一章 · 纯逻辑核心（引擎无关）
- * 实时 ARPG 战斗、移动碰撞、任务流程、对白状态机。
+ * 实时 ARPG 战斗、暗黑式属性/装备/掉落、移动碰撞、任务流程、对白状态机。
  * 不依赖 Cocos / DOM，可用 node 直接跑逻辑验证（见 tools/coretest.ts）。
- * 渲染层（Cocos GameController）只读取本类的状态来绘制，并把输入转发进来。
+ * 渲染层（CanvasGame）只读取本类的状态来绘制，并把输入转发进来。
+ * 数值/装备规格见 docs/开发计划.md 第二部分。
  * ============================================================ */
 
 import {
   GameData, TILE, MAP_COLS, MAP_ROWS, SOLID_TILES,
 } from './GameData';
 import {
-  DialogueLine, Effect, Enemy, Facing, IGameView, LostSheep, Phase, Player,
-  Projectile, QuestEntry,
+  DerivedStats, DialogueLine, Effect, Enemy, Facing, GroundItem, IGameView,
+  Item, LostSheep, Phase, Player, Popup, Projectile, QuestEntry, Slot,
 } from './types';
+import {
+  defaultAttributes, derive, emptyEquipment, reduction, scoreItem,
+  weaponDamage, xpToNext, levelUpAttributes,
+} from './Stats';
+import { affixLabel, rarityColor, rarityName, rollChestLoot, rollLoot } from './Items';
 
 const VIEW_W = 800;
 const VIEW_H = 576;
@@ -29,6 +35,7 @@ interface DialogueState {
   current: DialogueLine | null;
   onDone: (() => void) | null;
 }
+interface Chest { x: number; y: number; level: number; opened: boolean; }
 export interface InputState {
   left: boolean;
   right: boolean;
@@ -58,6 +65,8 @@ export class GameCore {
   player: Player = {
     x: 0, y: 0, facing: 'down', hp: 20, maxHp: 20, atk: 5,
     moving: false, animTimer: 0, frame: 0,
+    level: 1, xp: 0, attr: defaultAttributes(), equip: emptyEquipment(),
+    bag: [], stamina: 50, maxStamina: 50,
   };
   input: InputState = { left: false, right: false, up: false, down: false, attack: false };
 
@@ -70,16 +79,25 @@ export class GameCore {
   busy = false;
   battles = 0;
   questLogOpen = false;
+  equipPanelOpen = false;
+  bagSel = 0;
 
   /* ---- 即时战斗 ---- */
   weapon = 'sling';
   attackCD = 0;
   projectiles: Projectile[] = [];
   effects: Effect[] = [];
-  enemy: Enemy | null = null;
+  popups: Popup[] = [];
+  enemy: Enemy | null = null; // 主线首领（猛狮/邪灵）
+  ambient: Enemy[] = []; // 游荡小怪
+  groundItems: GroundItem[] = [];
+  chests: Chest[] = [];
+  ambientEnabled = true;
   hintShown = false;
   shake = 0;
   playerHurt = 0;
+
+  derived: DerivedStats = derive(this.player.attr, this.player.equip);
 
   dlg: DialogueState = { active: false, queue: [], current: null, onDone: null };
 
@@ -107,12 +125,16 @@ export class GameCore {
     this.player.x = ps.c * TILE;
     this.player.y = ps.r * TILE;
     this.player.facing = 'down';
-    this.player.hp = GameData.playerStats.maxHp;
-    this.player.maxHp = GameData.playerStats.maxHp;
-    this.player.atk = GameData.playerStats.atk;
     this.player.moving = false;
     this.player.animTimer = 0;
     this.player.frame = 0;
+    this.player.level = 1;
+    this.player.xp = 0;
+    this.player.attr = defaultAttributes();
+    this.player.equip = emptyEquipment();
+    this.player.bag = [];
+    this.recomputeDerived(true);
+    this.player.atk = GameData.playerStats.atk;
     this.lostSheep = GameData.lostSheep.map((s) => ({ ...s, taken: false }));
     this.sheepCollected = 0;
     this.lionActive = false;
@@ -124,21 +146,45 @@ export class GameCore {
     this.attackCD = 0;
     this.projectiles = [];
     this.effects = [];
+    this.popups = [];
     this.enemy = null;
+    this.ambient = [];
+    this.groundItems = [];
+    this.chests = GameData.chests.map((c) => ({
+      x: c.c * TILE, y: c.r * TILE, level: c.level, opened: false,
+    }));
     this.hintShown = false;
     this.shake = 0;
     this.playerHurt = 0;
     this.input = { left: false, right: false, up: false, down: false, attack: false };
     this.dlg = { active: false, queue: [], current: null, onDone: null };
     this.questLogOpen = false;
+    this.equipPanelOpen = false;
+    this.bagSel = 0;
   }
 
-  /** 每帧推进一次世界（固定步长，与原 Web 版按帧一致）。 */
+  /** 每帧推进一次世界（固定步长）。 */
   update(): void {
     if (!this.running) return;
-    if (this.busy || this.dlg.active || this.questLogOpen) return;
+    if (this.busy || this.dlg.active || this.questLogOpen || this.equipPanelOpen) return;
     this.updatePlayer();
     this.updateCombat();
+  }
+
+  /* ---------------- 派生属性 ---------------- */
+  recomputeDerived(fullHeal = false): void {
+    const prevMax = this.player.maxHp;
+    const d = derive(this.player.attr, this.player.equip);
+    this.derived = d;
+    this.player.maxHp = d.maxHp;
+    this.player.maxStamina = d.maxStamina;
+    if (fullHeal) {
+      this.player.hp = d.maxHp;
+      this.player.stamina = d.maxStamina;
+    } else if (d.maxHp !== prevMax) {
+      // 维持当前生命，最多到新上限
+      this.player.hp = Math.min(d.maxHp, this.player.hp + Math.max(0, d.maxHp - prevMax));
+    }
   }
 
   /* ---------------- 任务目标文本 ---------------- */
@@ -207,7 +253,6 @@ export class GameCore {
   dialogueActive(): boolean { return this.dlg.active; }
   currentLine(): DialogueLine | null { return this.dlg.current; }
 
-  /** 推进对白；返回 true 表示消费了这次输入 */
   advanceDialogue(): boolean {
     if (!this.dlg.active) return false;
     this.nextLine();
@@ -247,13 +292,11 @@ export class GameCore {
     else if (dy < 0) this.player.facing = 'up';
     else if (dy > 0) this.player.facing = 'down';
 
-    // 分轴移动，可贴墙滑动
     const nx = this.player.x + dx * SPEED;
     if (!this.blocked(nx, this.player.y)) this.player.x = nx;
     const ny = this.player.y + dy * SPEED;
     if (!this.blocked(this.player.x, ny)) this.player.y = ny;
 
-    // 行走动画
     if (this.player.moving) {
       this.player.animTimer++;
       if (this.player.animTimer > 8) { this.player.frame ^= 1; this.player.animTimer = 0; }
@@ -261,12 +304,25 @@ export class GameCore {
       this.player.frame = 0;
     }
 
+    if (this.player.stamina < this.player.maxStamina) this.player.stamina += 0.2;
     this.checkSheepPickup();
+    this.checkLootPickup();
   }
 
   playerCenter(): Vec { return { x: this.player.x + TILE / 2, y: this.player.y + TILE / 2 }; }
   private enemyCenter(e: Enemy): Vec { return { x: e.x + TILE / 2, y: e.y + TILE / 2 }; }
   private tileCenter(c: number, r: number): Vec { return { x: c * TILE + TILE / 2, y: r * TILE + TILE / 2 }; }
+
+  /** 渲染/输入层用：当前是否有可战斗的敌人（首领或游荡小怪）。 */
+  combatActive(): boolean { return this.allEnemies().length > 0; }
+
+  /** 当前所有可被攻击/造成接触伤害的敌人（首领 + 游荡小怪）。 */
+  private allEnemies(): Enemy[] {
+    const list: Enemy[] = [];
+    if (this.enemy && !this.enemy.dead) list.push(this.enemy);
+    for (const a of this.ambient) if (!a.dead) list.push(a);
+    return list;
+  }
 
   /* ---------------- 羊：触碰拾取 ---------------- */
   private checkSheepPickup(): void {
@@ -281,6 +337,7 @@ export class GameCore {
         if (this.sheepCollected >= 3) {
           this.phase = 'q1done';
           this.busy = true;
+          this.clearAmbient();
           this.showDialogue(GameData.dialogue.sheepFound, () => {
             this.view.toast('三只羊都找回来了，回去找父亲');
             this.busy = false;
@@ -291,18 +348,39 @@ export class GameCore {
     }
   }
 
-  /* ---------------- 互动（空格/回车）：仅与父亲耶西对话 ---------------- */
+  /* ---------------- 互动（空格/回车）：父亲对话 / 开宝箱 ---------------- */
   interact(): void {
     const pc = this.playerCenter();
+    // 先看宝箱
+    for (const ch of this.chests) {
+      if (ch.opened) continue;
+      if (dist(pc, { x: ch.x + TILE / 2, y: ch.y + TILE / 2 }) < 44) {
+        this.openChest(ch);
+        return;
+      }
+    }
     const jesse = GameData.npcs[0];
     if (dist(pc, this.tileCenter(jesse.c, jesse.r)) < 52) this.talkToJesse();
   }
 
-  /** 玩家是否站在可与父亲对话的范围内（渲染层用于画交互提示）。 */
   canTalkToJesse(): boolean {
     const pc = this.playerCenter();
     const jesse = GameData.npcs[0];
     return !this.busy && dist(pc, this.tileCenter(jesse.c, jesse.r)) < 52;
+  }
+
+  /** 玩家附近是否有可开启的宝箱（渲染层画提示用）。 */
+  nearChest(): boolean {
+    const pc = this.playerCenter();
+    return this.chests.some((ch) => !ch.opened
+      && dist(pc, { x: ch.x + TILE / 2, y: ch.y + TILE / 2 }) < 44);
+  }
+
+  private openChest(ch: Chest): void {
+    ch.opened = true;
+    const item = rollChestLoot(ch.level);
+    this.dropItem(ch.x + TILE / 2, ch.y, item);
+    this.view.toast(`宝箱开启！掉落 ${rarityName(item.rarity)}·${item.name}`, 1600);
   }
 
   private talkToJesse(): void {
@@ -310,7 +388,8 @@ export class GameCore {
     if (this.phase === 'intro') {
       this.showDialogue(GameData.dialogue.jesseQuest1, () => {
         this.phase = 'q1';
-        this.view.toast('新任务：找回走失的羊');
+        this.view.toast('新任务：找回走失的羊（沿途野狼可击杀刷经验/掉落）');
+        this.spawnAmbient();
         this.busy = false;
       });
     } else if (this.phase === 'q1') {
@@ -320,7 +399,7 @@ export class GameCore {
         this.phase = 'q2';
         this.lionActive = true;
         this.spawnEnemy('lion');
-        this.view.toast('实时战斗：J/空格 攻击 · 1/2/3 切换武器 · 可边跑边打');
+        this.view.toast('实时战斗：J/空格 攻击 · 1/2/3 切换武器 · C 查看装备', 2400);
         this.busy = false;
       });
     } else if (this.phase === 'q2') {
@@ -330,19 +409,35 @@ export class GameCore {
     }
   }
 
-  /* ---------------- 即时战斗 ---------------- */
-  spawnEnemy(key: string): void {
+  /* ---------------- 敌人生成 ---------------- */
+  private makeEnemy(key: string, c: number, r: number, ambient: boolean): Enemy {
     const def = GameData.enemies[key];
-    const pos = key === 'lion' ? GameData.lion : GameData.spirit;
-    this.enemy = {
+    return {
       key, name: def.name, type: def.type, sprite: def.sprite,
-      x: pos.c * TILE, y: pos.r * TILE,
+      x: c * TILE, y: r * TILE,
       hp: def.maxHp, maxHp: def.maxHp, atk: def.atk, spd: def.spd,
       aggro: def.aggro, touchRange: def.touchRange, touchMax: def.touchCD,
-      touchCD: 0, greeted: false, dead: false, hurt: 0,
+      touchCD: 0, greeted: ambient, dead: false, hurt: 0,
+      level: def.level || 1, xp: def.xp || 0,
+      lootChance: def.lootChance == null ? 0 : def.lootChance,
+      lootTier: def.lootTier || 'common',
+      ambient, scale: ambient ? 1.8 : (def.sprite === 'spirit' ? 2.6 : 3),
     };
   }
 
+  spawnEnemy(key: string): void {
+    const pos = key === 'lion' ? GameData.lion : GameData.spirit;
+    this.enemy = this.makeEnemy(key, pos.c, pos.r, false);
+  }
+
+  spawnAmbient(): void {
+    if (!this.ambientEnabled) return;
+    this.ambient = GameData.ambientSpawns.map((s) => this.makeEnemy(s.key, s.c, s.r, true));
+  }
+
+  private clearAmbient(): void { this.ambient = []; }
+
+  /* ---------------- 武器切换 ---------------- */
   setWeapon(id: string): void {
     if (!this.running || this.busy) return;
     if (this.weapon === id) return;
@@ -356,79 +451,158 @@ export class GameCore {
     this.setWeapon(order[(i + 1) % order.length]);
   }
 
+  /* ---------------- 攻击 ---------------- */
   tryAttack(): void {
-    if (!this.enemy || this.busy) return;
+    if (this.allEnemies().length === 0 || this.busy) return;
     if (this.attackCD > 0) return;
     const wpn = GameData.weapons[this.weapon];
-    this.attackCD = wpn.cd;
+    this.attackCD = Math.round(wpn.cd * this.derived.cdScale);
     const pc = this.playerCenter();
     const dir = facingVec(this.player.facing);
 
     if (this.weapon === 'sling') {
+      // 蓄力拉弓特效 + 飞石（带拖尾）
+      this.effects.push({
+        kind: 'drawback', x: pc.x, y: pc.y, life: 8, max: 8, facing: this.player.facing,
+      });
       this.projectiles.push({
-        x: pc.x, y: pc.y,
+        x: pc.x + dir.x * 14, y: pc.y + dir.y * 14,
         vx: dir.x * (wpn.projSpeed as number),
         vy: dir.y * (wpn.projSpeed as number),
-        life: wpn.projLife as number,
+        life: wpn.projLife as number, spin: 0, trail: [],
       });
     } else if (this.weapon === 'staff') {
+      // 近战弧形挥击 + 沿朝向推出的冲击波
       this.effects.push({
         kind: 'slash', x: pc.x + dir.x * 22, y: pc.y + dir.y * 22,
         facing: this.player.facing, life: 10, max: 10,
       });
-      const e = this.enemy;
-      if (e && !e.dead && dist(pc, this.enemyCenter(e)) < (wpn.reach as number)) this.damageEnemy(wpn);
+      this.effects.push({
+        kind: 'shockwave', x: pc.x + dir.x * 30, y: pc.y + dir.y * 30,
+        facing: this.player.facing, life: 16, max: 16, radius: (wpn.reach as number),
+      });
+      for (const e of this.allEnemies()) {
+        if (dist(pc, this.enemyCenter(e)) < (wpn.reach as number)) this.damageEnemy(e, wpn);
+      }
     } else if (this.weapon === 'harp') {
-      this.effects.push({ kind: 'wave', x: pc.x, y: pc.y, life: 28, max: 28, radius: wpn.radius });
-      const e = this.enemy;
-      if (e && !e.dead && dist(pc, this.enemyCenter(e)) < (wpn.radius as number)) this.damageEnemy(wpn);
+      // 弹琴：周身脉冲 + 多层音波环
+      this.effects.push({ kind: 'harpcast', x: pc.x, y: pc.y, life: 14, max: 14 });
+      this.effects.push({ kind: 'soundwave', x: pc.x, y: pc.y, life: 34, max: 34, radius: wpn.radius });
+      for (const e of this.allEnemies()) {
+        if (dist(pc, this.enemyCenter(e)) < (wpn.radius as number)) this.damageEnemy(e, wpn);
+      }
     }
   }
 
-  private damageEnemy(wpn: typeof GameData.weapons[string]): void {
-    const e = this.enemy;
-    if (!e || e.dead) return;
-    if (e.type === 'spirit') {
-      if (wpn.kind === 'harp') {
-        const dmg = rand(wpn.minDmg, wpn.maxDmg);
-        e.hp = Math.max(0, e.hp - dmg); e.hurt = 12; this.shake = 6;
-        this.view.toast(`圣洁琴声驱邪！-${dmg}`, 900);
-      } else {
-        e.hp = Math.max(0, e.hp - 1); e.hurt = 6;
-        if (!this.hintShown) {
-          this.view.toast('物理攻击对邪灵几乎无效！改用「弹琴赞美」(按 3)', 2200);
-          this.hintShown = true;
-        }
-      }
-    } else { // beast
-      if (wpn.kind === 'harp') {
-        e.atk = Math.max(2, e.atk - 1);
-        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
-        this.view.toast('弹琴安抚，猛狮气势稍减', 900);
-      } else {
-        const dmg = rand(wpn.minDmg, wpn.maxDmg);
-        e.hp = Math.max(0, e.hp - dmg); e.hurt = 12; this.shake = 6;
-      }
-    }
-    if (e.hp <= 0 && !e.dead) { e.dead = true; this.onEnemyDefeated(e.key); }
+  private pushPopup(x: number, y: number, text: string, color: string, big = false): void {
+    this.popups.push({
+      x: x + rand(-6, 6), y, text, color, life: big ? 46 : 38, max: big ? 46 : 38, vy: -0.6,
+    });
   }
 
-  private hitPlayer(): void {
-    const e = this.enemy;
-    if (!e) return;
-    const dmg = rand(Math.max(1, e.atk - 1), e.atk + 2);
+  private damageEnemy(e: Enemy, wpn: typeof GameData.weapons[string]): void {
+    if (e.dead) return;
+    const ec = this.enemyCenter(e);
+    const isHarp = wpn.kind === 'harp';
+
+    // 邪灵门控：物理几乎无效
+    if (e.type === 'spirit' && !isHarp) {
+      e.hp = Math.max(0, e.hp - 1); e.hurt = 6;
+      this.pushPopup(ec.x, e.y, '抵抗 -1', '#9aa0b5');
+      if (!this.hintShown) {
+        this.view.toast('物理攻击对邪灵几乎无效！改用「弹琴赞美」(按 3)', 2200);
+        this.hintShown = true;
+      }
+      if (e.hp <= 0) this.onEnemyKilled(e);
+      return;
+    }
+    // 野兽被弹琴：安抚（降攻 + 回血）而非高伤
+    if (e.type === 'beast' && isHarp) {
+      e.atk = Math.max(2, e.atk - 1);
+      this.heal(1);
+      this.pushPopup(ec.x, e.y, '安抚', '#ffe27a');
+      return;
+    }
+
+    // 标准伤害公式
+    const d = this.derived;
+    const kind = isHarp ? 'harp' : 'phys';
+    const wd = weaponDamage(kind, wpn.minDmg, wpn.maxDmg, d);
+    let dmg = rand(wd.min, wd.max);
+    const crit = Math.random() < d.crit;
+    if (crit) dmg = Math.round(dmg * d.critMult);
+    dmg = Math.max(1, dmg);
+
+    e.hp = Math.max(0, e.hp - dmg); e.hurt = 12; this.shake = crit ? 9 : 6;
+    const color = isHarp ? '#d6a0ff' : (crit ? '#ffd24a' : '#ffffff');
+    this.pushPopup(ec.x, e.y, (crit ? '暴击 ' : '') + `-${dmg}`, color, crit);
+    if (crit) this.effects.push({ kind: 'critstar', x: ec.x, y: ec.y, life: 12, max: 12 });
+    if (isHarp) this.view.toast(`圣洁琴声驱邪！-${dmg}`, 700);
+
+    // 生命偷取
+    if (d.lifeSteal > 0) this.heal(Math.max(1, Math.floor(dmg * d.lifeSteal)));
+
+    if (e.hp <= 0 && !e.dead) this.onEnemyKilled(e);
+  }
+
+  private heal(amount: number): void {
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + amount);
+  }
+
+  private hitPlayer(e: Enemy): void {
+    const d = this.derived;
+    if (Math.random() < d.dodge) {
+      this.pushPopup(this.player.x + TILE / 2, this.player.y, '闪避', '#9aa0b5');
+      return;
+    }
+    let dmg = rand(Math.max(1, e.atk - 1), e.atk + 2);
+    dmg = Math.max(1, Math.round(dmg * (1 - reduction(d.armor, e.level))));
     this.player.hp = Math.max(0, this.player.hp - dmg);
+    this.pushPopup(this.player.x + TILE / 2, this.player.y, `-${dmg}`, '#ff7a7a');
     this.shake = 6; this.playerHurt = 12;
     if (this.player.hp <= 0) this.playerDown();
   }
 
-  private onEnemyDefeated(key: string): void {
+  /* ---------------- 击杀处理 ---------------- */
+  private onEnemyKilled(e: Enemy): void {
+    e.dead = true;
+    this.grantXp(e.xp);
+    const loot = rollLoot(e);
+    if (loot) this.dropItem(e.x + TILE / 2, e.y + TILE / 2, loot);
+    if (e.ambient) {
+      this.ambient = this.ambient.filter((a) => a !== e);
+      return;
+    }
+    this.onBossDefeated(e.key);
+  }
+
+  private grantXp(amount: number): void {
+    if (amount <= 0) return;
+    const gain = Math.round(amount * (1 + this.derived.xpPct));
+    this.player.xp += gain;
+    let leveled = false;
+    while (this.player.xp >= xpToNext(this.player.level)) {
+      this.player.xp -= xpToNext(this.player.level);
+      this.player.level += 1;
+      this.player.attr = levelUpAttributes(this.player.attr, this.player.level);
+      leveled = true;
+    }
+    if (leveled) {
+      this.recomputeDerived(true);
+      const pc = this.playerCenter();
+      this.effects.push({ kind: 'levelup', x: pc.x, y: pc.y + 14, life: 30, max: 30 });
+      this.pushPopup(pc.x, this.player.y - 6, `LEVEL UP! Lv.${this.player.level}`, '#ffe27a', true);
+      this.view.toast(`升级！等级 ${this.player.level}（属性提升，生命回满）`, 1600);
+    }
+  }
+
+  private onBossDefeated(key: string): void {
     this.enemy = null;
     this.projectiles = [];
-    this.effects = [];
     this.busy = true;
     if (key === 'lion') {
       this.lionDefeated = true; this.lionActive = false;
+      this.clearAmbient();
       this.showDialogue(GameData.dialogue.lionDefeated, () => {
         this.showDialogue(GameData.dialogue.nightFall, () => {
           this.phase = 'q3';
@@ -452,7 +626,6 @@ export class GameCore {
   private playerDown(): void {
     this.busy = true;
     this.projectiles = [];
-    this.effects = [];
     this.player.hp = this.player.maxHp;
     const e = this.enemy;
     if (e) {
@@ -461,44 +634,126 @@ export class GameCore {
       e.hp = e.maxHp; e.atk = def.atk; e.x = pos.c * TILE; e.y = pos.r * TILE;
       e.touchCD = 0; e.dead = false; e.greeted = true; e.hurt = 0;
     }
+    this.clearAmbient();
     let line: DialogueLine[];
     if (this.phase === 'q3') {
       this.player.x = 9 * TILE; this.player.y = 23 * TILE; this.player.facing = 'up';
       line = [{ name: '旁白', text: '邪灵的阴影压得大卫几乎窒息……稳住心神，再弹起竖琴!' }];
     } else {
-      // 退到山洞西侧的小路上，与猛狮拉开距离再战
       this.player.x = 26 * TILE; this.player.y = 22 * TILE; this.player.facing = 'right';
       line = [{ name: '旁白', text: '大卫被猛狮扑退……他退到路上，深吸一口气，握紧投石索再来一次!' }];
     }
     this.showDialogue(line, () => { this.busy = false; });
   }
 
+  /* ---------------- 掉落 / 拾取 ---------------- */
+  private dropItem(x: number, y: number, item: Item): void {
+    // 在掉落点附近散开，避免重叠
+    const ox = rand(-10, 10);
+    this.groundItems.push({ x: x + ox, y, item, bob: 0 });
+  }
+
+  private checkLootPickup(): void {
+    const pc = this.playerCenter();
+    const range = this.derived.pickup;
+    for (let i = this.groundItems.length - 1; i >= 0; i--) {
+      const g = this.groundItems[i];
+      if (dist(pc, { x: g.x, y: g.y }) < range) {
+        this.groundItems.splice(i, 1);
+        this.acquireItem(g.item);
+      }
+    }
+  }
+
+  /** 拾取一件装备：若比当前槽位更优则自动装备，否则进背包。 */
+  private acquireItem(item: Item): void {
+    const cur = this.player.equip[item.slot];
+    if (scoreItem(item) > scoreItem(cur)) {
+      if (cur) this.player.bag.push(cur);
+      this.player.equip[item.slot] = item;
+      this.recomputeDerived();
+      this.view.toast(`已装备 · ${rarityName(item.rarity)}「${item.name}」`, 1500);
+    } else {
+      this.player.bag.push(item);
+      this.view.toast(`拾取 · ${rarityName(item.rarity)}「${item.name}」(已入背包，按 C 查看)`, 1500);
+    }
+  }
+
+  /* ---------------- 装备面板 ---------------- */
+  toggleEquipPanel(): boolean {
+    if (this.dlg.active) return this.equipPanelOpen;
+    this.equipPanelOpen = !this.equipPanelOpen;
+    if (this.equipPanelOpen) this.questLogOpen = false;
+    this.bagSel = 0;
+    return this.equipPanelOpen;
+  }
+
+  moveBagSel(delta: number): void {
+    if (!this.equipPanelOpen || this.player.bag.length === 0) return;
+    const n = this.player.bag.length;
+    this.bagSel = ((this.bagSel + delta) % n + n) % n;
+  }
+
+  /** 装备背包中当前选中的物品（替换对应槽位）。 */
+  equipSelected(): void {
+    if (!this.equipPanelOpen) return;
+    const bag = this.player.bag;
+    if (this.bagSel < 0 || this.bagSel >= bag.length) return;
+    const item = bag[this.bagSel];
+    const cur = this.player.equip[item.slot];
+    bag.splice(this.bagSel, 1);
+    this.player.equip[item.slot] = item;
+    if (cur) bag.push(cur);
+    this.recomputeDerived();
+    if (this.bagSel >= bag.length) this.bagSel = Math.max(0, bag.length - 1);
+    this.view.toast(`装备 · ${rarityName(item.rarity)}「${item.name}」`, 1200);
+  }
+
+  /** 渲染层用：装备物品颜色（按稀有度）。 */
+  itemColor(item: Item): string { return rarityColor(item.rarity); }
+  affixText(item: Item): string[] {
+    return item.affixes.map((a) => `  +${a.value} ${affixLabel(a.stat)}`);
+  }
+  slotLabel(slot: Slot): string {
+    const m: Record<Slot, string> = {
+      focus: '武器焦点', armor: '护甲', helm: '头盔', amulet: '护符', ring: '戒指',
+    };
+    return m[slot];
+  }
+
+  /* ---------------- 更新子系统 ---------------- */
   private updateProjectiles(): void {
-    const e = this.enemy;
     const sling = GameData.weapons.sling;
+    const targets = this.allEnemies();
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
-      p.x += p.vx; p.y += p.vy; p.life--;
+      // 拖尾
+      p.trail.push({ x: p.x, y: p.y });
+      if (p.trail.length > 5) p.trail.shift();
+      p.x += p.vx; p.y += p.vy; p.life--; p.spin += 0.4;
       let remove = false;
       if (p.life <= 0 || this.solidAtPixel(p.x, p.y)) {
         remove = true;
-      } else if (e && !e.dead && dist(p, this.enemyCenter(e)) < (sling.hitR as number)) {
-        this.damageEnemy(sling);
-        this.effects.push({ kind: 'hit', x: p.x, y: p.y, life: 8, max: 8 });
-        remove = true;
+      } else {
+        for (const e of targets) {
+          if (!e.dead && dist(p, this.enemyCenter(e)) < (sling.hitR as number)) {
+            this.damageEnemy(e, sling);
+            this.effects.push({ kind: 'hit', x: p.x, y: p.y, life: 10, max: 10 });
+            remove = true;
+            break;
+          }
+        }
       }
       if (remove) this.projectiles.splice(i, 1);
     }
   }
 
-  private updateEnemy(): void {
-    const e = this.enemy;
-    if (!e || e.dead) return;
+  private updateEnemyOne(e: Enemy): void {
+    if (e.dead) return;
     const pc = this.playerCenter();
     const ec = this.enemyCenter(e);
     const d = dist(pc, ec);
 
-    // 首次接近 → 触发登场对白
     if (!e.greeted && d < 175) {
       e.greeted = true;
       this.busy = true;
@@ -509,22 +764,24 @@ export class GameCore {
     }
     if (!e.greeted) return;
 
-    // 追逐（在仇恨范围内）
     if (d < e.aggro && d > 1) {
       const vx = (pc.x - ec.x) / d;
       const vy = (pc.y - ec.y) / d;
       e.x += vx * e.spd; e.y += vy * e.spd;
-      // 限制在地图内
       e.x = Math.max(TILE, Math.min(e.x, MAP_W - TILE * 2));
       e.y = Math.max(TILE, Math.min(e.y, MAP_H - TILE * 2));
     }
 
-    // 接触造成伤害
     if (e.touchCD > 0) e.touchCD--;
     if (d < e.touchRange && e.touchCD <= 0) {
-      this.hitPlayer();
+      this.hitPlayer(e);
       e.touchCD = e.touchMax;
     }
+  }
+
+  private updateEnemies(): void {
+    if (this.enemy && !this.enemy.dead) this.updateEnemyOne(this.enemy);
+    for (const a of this.ambient) this.updateEnemyOne(a);
   }
 
   private updateEffects(): void {
@@ -533,19 +790,33 @@ export class GameCore {
     }
   }
 
+  private updatePopups(): void {
+    for (let i = this.popups.length - 1; i >= 0; i--) {
+      const pp = this.popups[i];
+      pp.y += pp.vy; pp.life--;
+      if (pp.life <= 0) this.popups.splice(i, 1);
+    }
+  }
+
+  private updateGround(): void {
+    for (const g of this.groundItems) g.bob += 0.12;
+  }
+
   private updateCombat(): void {
     if (this.attackCD > 0) this.attackCD--;
     if (this.input.attack) this.tryAttack();
     this.updateProjectiles();
-    this.updateEnemy();
+    this.updateEnemies();
     this.updateEffects();
+    this.updatePopups();
+    this.updateGround();
     if (this.shake > 0) this.shake--;
     if (this.playerHurt > 0) this.playerHurt--;
   }
 
   private finishChapter(): void {
     this.running = false;
-    this.view.onFinish({ hp: this.player.hp, maxHp: this.player.maxHp });
+    this.view.onFinish({ hp: this.player.hp, maxHp: this.player.maxHp, level: this.player.level });
   }
 
   /* ---------------- 输入入口（供渲染层转发） ---------------- */
@@ -555,16 +826,17 @@ export class GameCore {
   setAttack(down: boolean): void {
     this.input.attack = down;
   }
-  /** 空格 / 回车：对白中推进；战斗中无敌人时与父亲对话 */
   confirm(): void {
     if (this.dlg.active) { this.advanceDialogue(); return; }
-    if (this.running && !this.busy && !this.questLogOpen && !this.enemy) {
+    if (this.equipPanelOpen) { this.equipSelected(); return; }
+    if (this.running && !this.busy && !this.questLogOpen) {
       this.interact();
     }
   }
   toggleQuestLog(): boolean {
     if (this.dlg.active) return this.questLogOpen;
     this.questLogOpen = !this.questLogOpen;
+    if (this.questLogOpen) this.equipPanelOpen = false;
     return this.questLogOpen;
   }
 }

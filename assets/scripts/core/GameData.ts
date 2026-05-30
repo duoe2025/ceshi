@@ -159,14 +159,34 @@ export const GameData = {
    * spd=每帧移动像素；aggro=进入追逐的距离；touchCD=接触攻击冷却帧；touchRange=接触判定距离 */
   enemies: {
     lion: {
-      name: '猛狮', type: 'beast', maxHp: 30, atk: 4, spd: 1.6,
+      name: '猛狮', type: 'beast', maxHp: 44, atk: 5, spd: 1.6,
       aggro: 220, touchCD: 50, touchRange: 28, sprite: 'lion', attackName: '利爪',
+      level: 2, xp: 30, lootChance: 1, lootTier: 'rare',
     },
     spirit: {
-      name: '邪灵', type: 'spirit', maxHp: 26, atk: 4, spd: 1.5,
+      name: '邪灵', type: 'spirit', maxHp: 40, atk: 5, spd: 1.5,
       aggro: 999, touchCD: 50, touchRange: 32, sprite: 'spirit', attackName: '阴影侵蚀',
+      level: 3, xp: 45, lootChance: 1, lootTier: 'unique',
+    },
+    wolf: {
+      name: '野狼', type: 'beast', maxHp: 14, atk: 3, spd: 1.7,
+      aggro: 150, touchCD: 46, touchRange: 24, sprite: 'lion', attackName: '撕咬',
+      level: 1, xp: 8, lootChance: 0.55, lootTier: 'common',
     },
   } as Record<string, EnemyDef>,
+
+  /* 游荡小怪刷新点（关卡丰富化：提供刷经验/掉落的野外） */
+  ambientSpawns: [
+    { key: 'wolf', c: 27, r: 7 },
+    { key: 'wolf', c: 14, r: 9 },
+    { key: 'wolf', c: 22, r: 20 },
+  ] as Array<{ key: string; c: number; r: number }>,
+
+  /* 宝箱（走近按空格开启，掉落装备） */
+  chests: [
+    { c: 12, r: 6, level: 2 },
+    { c: 31, r: 18, level: 3 },
+  ] as Array<{ c: number; r: number; level: number }>,
 
   /* 三种武器（即时攻击）
    * dmgType:'phys' 物理（弹弓/杖杆）——对邪灵几乎无效
