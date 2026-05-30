@@ -191,10 +191,10 @@ export class CanvasGame implements IGameView {
     }
   }
 
-  /** 屏幕层渲染：夜战压暗 + HUD/对白/面板/提示/结算（固定屏幕坐标）。 */
+  /** 屏幕层渲染：HUD/对白/面板/提示/结算（固定屏幕坐标）。
+   * 注：夜战压暗已由 WorldScene 的原生 Rectangle（仅暗世界层、不暗 HUD）承担。 */
   renderUI(): void {
     const G = this.core;
-    if (G.phase === 'q3' && !G.spiritDefeated) this.painter.fillRect(0, 0, VIEW_W, VIEW_H, rgba(14, 16, 46, 128));
 
     if (!this.finished) {
       this.text(`目标：${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));

@@ -36,6 +36,7 @@ export class WorldScene extends Phaser.Scene {
   private beams!: Phaser.GameObjects.Particles.ParticleEmitter;  // 掉落光柱（按稀有度着色）
   private seenFx = new WeakSet<object>();   // 已处理的特效（命中/暴击/升级）
   private seenLoot = new WeakSet<object>(); // 已喷光柱的地面掉落
+  private night!: Phaser.GameObjects.Rectangle; // 夜战压暗（原生固定层，仅暗世界不暗 HUD）
   private prevShake = 0;
   private prevHurt = 0;
 
@@ -57,6 +58,10 @@ export class WorldScene extends Phaser.Scene {
     cam.setBounds(0, 0, MAP_W, MAP_H);
     cam.setBackgroundColor('#14161c');
     cam.roundPixels = true;
+
+    // 夜战压暗：原生 Rectangle 固定在相机（不随世界滚动），仅覆盖世界层；HUD 在 UIScene 之上保持明亮
+    this.night = this.add.rectangle(0, 0, VIEW_W, VIEW_H, 0x0e102e, 0.5)
+      .setOrigin(0, 0).setScrollFactor(0).setDepth(6).setVisible(false);
 
     this.initParticles();
     this.bindInput();
@@ -158,6 +163,10 @@ export class WorldScene extends Phaser.Scene {
     this.emitEffectParticles();
     this.emitLootBeams();
     this.cameraFeedback();
+
+    // 夜战压暗（原生层）：邪灵阶段未驱散时变暗
+    const core = this.game1.core;
+    this.night.setVisible(core.phase === 'q3' && !core.spiritDefeated);
   }
 
   /** 对每个「新出现」的特效喷原生粒子：命中迸溅 / 暴击 / 升级。 */
