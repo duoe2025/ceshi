@@ -13,9 +13,15 @@
 import Phaser from 'phaser';
 import { CanvasGame, VIEW_W, VIEW_H } from '../canvas/CanvasGame';
 import { TILE, MAP_COLS, MAP_ROWS } from '../core/GameData';
+import { rarityColor } from '../core/Items';
 import { PhaserPainter } from './PhaserPainter';
 import { PhaserTextLayer } from './PhaserText';
 import { UI_SCENE } from './UIScene';
+
+/** '#rrggbb' → 0xRRGGBB（粒子着色用） */
+function hexToInt(css: string): number {
+  return parseInt(css.replace('#', '').slice(0, 6), 16) || 0xffffff;
+}
 
 export const WORLD_SCENE = 'world';
 const MAP_W = MAP_COLS * TILE;
@@ -25,8 +31,11 @@ export class WorldScene extends Phaser.Scene {
   private game1!: CanvasGame;
   private painter!: PhaserPainter;
   private textLayer!: PhaserTextLayer;
-  private sparks!: Phaser.GameObjects.Particles.ParticleEmitter;
-  private seenHits = new WeakSet<object>();
+  private sparks!: Phaser.GameObjects.Particles.ParticleEmitter; // 命中迸溅
+  private motes!: Phaser.GameObjects.Particles.ParticleEmitter;  // 升级/暴击 金色
+  private beams!: Phaser.GameObjects.Particles.ParticleEmitter;  // 掉落光柱（按稀有度着色）
+  private seenFx = new WeakSet<object>();   // 已处理的特效（命中/暴击/升级）
+  private seenLoot = new WeakSet<object>(); // 已喷光柱的地面掉落
   private prevShake = 0;
   private prevHurt = 0;
 
@@ -73,6 +82,35 @@ export class WorldScene extends Phaser.Scene {
       emitting: false,
     });
     this.sparks.setDepth(3); // 图元之上、文本之下
+
+    // 升级/暴击：金色四散光点
+    this.motes = this.add.particles(0, 0, 'spark', {
+      lifespan: 560,
+      speed: { min: 40, max: 130 },
+      scale: { start: 2.2, end: 0 },
+      alpha: { start: 1, end: 0 },
+      tint: 0xffe27a,
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    this.motes.setDepth(4);
+
+    // 掉落光柱：竖直上升的细条，按稀有度着色
+    const b = this.make.graphics({ x: 0, y: 0 }, false);
+    b.fillStyle(0xffffff, 1);
+    b.fillRect(0, 0, 2, 8);
+    b.generateTexture('beam', 2, 8);
+    b.destroy();
+    this.beams = this.add.particles(0, 0, 'beam', {
+      lifespan: 640,
+      speedY: { min: -48, max: -22 },
+      speedX: { min: -10, max: 10 },
+      scaleY: { start: 1.4, end: 0.2 },
+      alpha: { start: 0.9, end: 0 },
+      blendMode: 'ADD',
+      emitting: false,
+    });
+    this.beams.setDepth(2);
   }
 
   private bindInput(): void {
@@ -117,18 +155,36 @@ export class WorldScene extends Phaser.Scene {
     this.textLayer.end();
 
     // 4) 原生特效：命中粒子 + 受击/重击相机反馈
-    this.emitHitParticles();
+    this.emitEffectParticles();
+    this.emitLootBeams();
     this.cameraFeedback();
   }
 
-  /** 对每个「新出现」的命中特效喷一束粒子（与绘制的迸溅叠加，更有打击感）。 */
-  private emitHitParticles(): void {
+  /** 对每个「新出现」的特效喷原生粒子：命中迸溅 / 暴击 / 升级。 */
+  private emitEffectParticles(): void {
     const fx = this.game1.core.effects as Array<{ x: number; y: number; kind: string }>;
     for (const e of fx) {
-      if (e.kind === 'hit' && !this.seenHits.has(e)) {
-        this.seenHits.add(e);
+      if (this.seenFx.has(e)) continue;
+      this.seenFx.add(e);
+      if (e.kind === 'hit') {
         this.sparks.explode(8, e.x, e.y);
+      } else if (e.kind === 'critstar') {
+        this.motes.explode(10, e.x, e.y);
+      } else if (e.kind === 'levelup') {
+        this.motes.explode(26, e.x, e.y);
+        this.cameras.main.flash(180, 90, 80, 30); // 金色升级闪光
       }
+    }
+  }
+
+  /** 对每个「新掉落」的地面物品喷一波按稀有度着色的上升光柱。 */
+  private emitLootBeams(): void {
+    const items = this.game1.core.groundItems as Array<{ x: number; y: number; item: { rarity: import('../core/types').Rarity } }>;
+    for (const g of items) {
+      if (this.seenLoot.has(g)) continue;
+      this.seenLoot.add(g);
+      this.beams.particleTint = hexToInt(rarityColor(g.item.rarity));
+      this.beams.explode(10, g.x, g.y);
     }
   }
 
