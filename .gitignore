@@ -21,5 +21,3 @@ Thumbs.db
 /tools/node_modules/
 /tools/out/
 /tools/out2/
-/tools/package.json
-/tools/package-lock.json

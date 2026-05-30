@@ -1,0 +1,14 @@
+{
+  "name": "david-chapter1-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "沙盒里对引擎无关核心逻辑做无头验证的工具（无需 Cocos 编辑器）",
+  "scripts": {
+    "test": "tsc -p tsconfig.json && node out/tools/coretest.js",
+    "typecheck:engine": "tsc -p tsconfig.engine.json"
+  },
+  "devDependencies": {
+    "typescript": "5.4.5",
+    "@types/node": "20.11.30"
+  }
+}
