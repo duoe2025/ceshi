@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>牧童大卫 · 第一章 Demo</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="game-shell">
+    <header id="title-bar">
+      <h1>牧童大卫 <span>· 第一章：伯利恒的牧场</span></h1>
+    </header>
+
+    <div id="stage">
+      <canvas id="screen" width="800" height="576"></canvas>
+
+      <!-- HUD -->
+      <div id="hud">
+        <div id="hp-box">
+          <span class="label">大卫</span>
+          <div class="bar-outer"><div id="hp-bar" class="bar-inner"></div></div>
+          <span id="hp-text">20 / 20</span>
+        </div>
+        <div id="quest-tracker">
+          <div class="quest-title">任务</div>
+          <div id="quest-objective">—</div>
+        </div>
+      </div>
+
+      <!-- Dialogue -->
+      <div id="dialogue" class="hidden">
+        <div id="dialogue-name"></div>
+        <div id="dialogue-text"></div>
+        <div id="dialogue-hint">▼ 空格 / 回车 继续</div>
+      </div>
+
+      <!-- Toast -->
+      <div id="toast" class="hidden"></div>
+
+      <!-- Title / start screen -->
+      <div id="start-screen">
+        <div class="start-card">
+          <h2>牧童大卫</h2>
+          <p class="subtitle">第一章 · 伯利恒的牧场</p>
+          <p class="blurb">耶西最小的儿子大卫，在伯利恒城外放羊。<br/>找回走失的羊群，并用投石索守护它们。</p>
+          <button id="start-btn">开始游戏</button>
+          <div class="controls">
+            <p><b>移动</b> 方向键 / WASD&nbsp;&nbsp;·&nbsp;&nbsp;<b>交谈 / 确认</b> 空格 / 回车</p>
+            <p><b>攻击</b> J / 空格（可按住边跑边打）&nbsp;&nbsp;·&nbsp;&nbsp;<b>切换武器</b> 1 / 2 / 3（或 K 循环）</p>
+            <p><b>任务日志</b> Q&nbsp;&nbsp;·&nbsp;&nbsp;打不过就拉开距离，再用远程风筝</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- End screen -->
+      <div id="end-screen" class="hidden">
+        <div class="start-card">
+          <h2>第一章 完成</h2>
+          <p class="subtitle">牧童大卫守护了羊群</p>
+          <p class="blurb" id="end-stats"></p>
+          <button id="restart-btn">再玩一次</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quest log panel -->
+    <div id="quest-log" class="hidden">
+      <h3>任务日志 <span class="close-hint">(Q 关闭)</span></h3>
+      <ul id="quest-log-list"></ul>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/sprites.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/game.js"></script>
+</body>
+</html>
