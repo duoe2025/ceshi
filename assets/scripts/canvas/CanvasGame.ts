@@ -46,6 +46,10 @@ export class CanvasGame implements IGameView {
   private animClock = 0;
   private toastMsg = '';
   private toastTimer = 0;
+  /* toast 队列：同帧内多条 toast 顺序排队播放，避免互相覆盖
+   * （如夜幕骤降时「诗篇碎片」「按 P 祷告」「弹琴赞美」三条都需被看见）。 */
+  private toastQueue: { msg: string; ms: number }[] = [];
+  private static readonly TOAST_QUEUE_MAX = 4;
   private finished = false;
 
   // 触摸控件
@@ -90,7 +94,24 @@ export class CanvasGame implements IGameView {
   setTouchControls(on: boolean): void { this.touchUI = on; }
 
   /* ---------------- IGameView ---------------- */
-  toast(msg: string, ms = 1800): void { this.toastMsg = msg; this.toastTimer = ms / 1000; }
+  toast(msg: string, ms = 1800): void {
+    if (this.toastTimer > 0) {
+      // 已有 toast 在显示：排队顺序播放，保留每条关键提示（诗篇/祷告等）
+      if (this.toastQueue.length < CanvasGame.TOAST_QUEUE_MAX) this.toastQueue.push({ msg, ms });
+      return;
+    }
+    this.toastMsg = msg; this.toastTimer = ms / 1000;
+  }
+
+  /** 推进 toast 计时；当前条结束后自动播放队列中的下一条。 */
+  private tickToast(dt: number): void {
+    if (this.toastTimer <= 0) return;
+    this.toastTimer -= dt;
+    if (this.toastTimer <= 0) {
+      const next = this.toastQueue.shift();
+      if (next) { this.toastMsg = next.msg; this.toastTimer = next.ms / 1000; } else { this.toastMsg = ''; }
+    }
+  }
 
   onFinish(stats: FinishStats): void {
     this.finished = true;
@@ -109,7 +130,7 @@ export class CanvasGame implements IGameView {
     this.last = t;
     if (dt > 0.1) dt = 0.1;
     this.animClock += dt;
-    if (this.toastTimer > 0) this.toastTimer -= dt;
+    this.tickToast(dt);
     if (!this.finished) {
       this.acc += dt;
       let guard = 0;
@@ -129,7 +150,7 @@ export class CanvasGame implements IGameView {
     this.last = t;
     if (dt > 0.1) dt = 0.1;
     this.animClock += dt;
-    if (this.toastTimer > 0) this.toastTimer -= dt;
+    this.tickToast(dt);
     if (!this.finished) {
       this.acc += dt;
       let guard = 0;

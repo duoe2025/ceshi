@@ -368,6 +368,7 @@ console.log('\n[10] 儿童版灵魂层（穿越开场 / 恐惧条 / 安静祷告
   check(!!c3.currentLine() && c3.currentLine()!.text.indexOf('圣经') < 0,
     '非儿童模式不播放穿越开场');
   check(c3.objectiveText().indexOf('牧人的心') < 0, '非儿童模式任务文案为标准版');
+  check(!c3.pray(), '非儿童模式安静祷告被守卫拦截（pray 返回 false）');
 }
 
 console.log(`\n=== 结果：${assertions - failures}/${assertions} 通过 ===`);

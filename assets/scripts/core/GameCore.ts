@@ -223,6 +223,7 @@ export class GameCore {
   /** 安静祷告（按 P）：非魔法——不加攻击力，只让恐惧下降、心神安定。
    * 返回是否成功触发（冷却中或不可操作时返回 false）。 */
   pray(): boolean {
+    if (!this.childMode) return false; // 安静祷告属儿童版灵魂层，标准模式不启用
     if (!this.running || this.busy || this.dlg.active) return false;
     if (this.questLogOpen || this.equipPanelOpen) return false;
     if (this.prayCD > 0) return false;
