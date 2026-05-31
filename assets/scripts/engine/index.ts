@@ -27,3 +27,8 @@ export * as MapEngine from '../core/GameData';
 // 主编排与运行时类型（武器/怪物/特效/任务暂由 GameCore 承载，后续拆分）
 export { GameCore } from '../core/GameCore';
 export type { InputState } from '../core/GameCore';
+
+// 世界引擎（互通大世界：节点图谱 / 解锁门控 / 访问·通关 / 跨场景快照）
+export { WorldEngine } from './WorldEngine';
+export type { MapNode, MapKind, WorldState } from './WorldEngine';
+export { DAVID_WORLD } from './WorldData';

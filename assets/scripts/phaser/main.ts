@@ -6,8 +6,10 @@
 
 import Phaser from 'phaser';
 import { VIEW_W, VIEW_H } from '../canvas/CanvasGame';
+import { WorldMapScene } from './WorldMapScene';
 import { WorldScene } from './WorldScene';
 import { UIScene } from './UIScene';
+import { FieldScene } from './FieldScene';
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
@@ -20,8 +22,9 @@ const game = new Phaser.Game({
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
   },
-  // WorldScene 在前：每帧先 step()+渲染世界并写入 registry；UIScene 叠加渲染 HUD。
-  scene: [WorldScene, UIScene],
+  // 启动场景=世界地图枢纽（WorldMapScene，列表首个）；点击节点切入对应地图。
+  // 渲染层级按列表顺序：WorldScene 在 UIScene 之前 → HUD 叠加在世界之上。
+  scene: [WorldMapScene, WorldScene, UIScene, FieldScene],
 });
 // 调试钩子：浏览器控制台可访问 __DAVID.game / 当前场景
 (window as unknown as { __DAVID: Phaser.Game }).__DAVID = game;
