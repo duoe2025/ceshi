@@ -67,7 +67,7 @@ export const DAVID_WORLD: MapNode[] = [
     subtitle: '逃往撒母耳处避难（撒上 19）',
     kind: 'town',
     mx: 0.691, my: 0.182,
-    connections: ['gibeah'],
+    connections: ['gibeah', 'gilboa'],
     scene: null,
     requires: ['gibeah'],
   },
