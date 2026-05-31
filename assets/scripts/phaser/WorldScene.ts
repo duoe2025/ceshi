@@ -17,7 +17,7 @@ import { rarityColor } from '../core/Items';
 import { PhaserPainter } from './PhaserPainter';
 import { PhaserTextLayer } from './PhaserText';
 import { UI_SCENE } from './UIScene';
-import { WORLD_MAP_SCENE, getWorld } from './WorldMapScene';
+import { WORLD_MAP_SCENE, getWorld, saveWorld } from './WorldMapScene';
 
 /** '#rrggbb' → 0xRRGGBB（粒子着色用） */
 function hexToInt(css: string): number {
@@ -194,6 +194,8 @@ export class WorldScene extends Phaser.Scene {
     if (!this.completedOnce && core.phase === 'done') {
       this.completedOnce = true;
       getWorld(this).complete('bethlehem');
+      saveWorld(this); // 通关解锁后立即存档
+
     }
   }
 
@@ -202,6 +204,7 @@ export class WorldScene extends Phaser.Scene {
     if (this.leaving) return;
     this.leaving = true;
     getWorld(this).leave();
+    saveWorld(this);
     this.scene.stop(UI_SCENE);
     this.scene.start(WORLD_MAP_SCENE);
   }

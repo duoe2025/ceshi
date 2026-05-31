@@ -16,7 +16,7 @@ import { TILE, T, SOLID_TILES } from '../core/GameData';
 import * as Sprites from '../Sprites';
 import { PhaserPainter } from './PhaserPainter';
 import { PhaserTextLayer } from './PhaserText';
-import { WORLD_MAP_SCENE, getWorld } from './WorldMapScene';
+import { WORLD_MAP_SCENE, getWorld, saveWorld } from './WorldMapScene';
 
 export const FIELD_SCENE = 'field';
 
@@ -211,6 +211,7 @@ export class FieldScene extends Phaser.Scene {
     if (this.leaving) return;
     this.leaving = true;
     getWorld(this).leave();
+    saveWorld(this);
     this.scene.start(WORLD_MAP_SCENE);
   }
 }

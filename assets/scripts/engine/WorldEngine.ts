@@ -26,9 +26,9 @@ export interface MapNode {
   subtitle?: string;
   /** 类型 */
   kind: MapKind;
-  /** 在世界地图网格上的布局位置（用于绘制连线/图标） */
-  col: number;
-  row: number;
+  /** 在世界地图底图上的归一化位置（0~1，相对地图图片宽/高；表现层据此对齐城市） */
+  mx: number;
+  my: number;
   /** 互通的相邻节点 id（无向；表现层据此画连线、做就近传送） */
   connections: string[];
   /** 进入时启动的 Phaser 场景 key；null = 占位节点（敬请期待，不可进入） */
