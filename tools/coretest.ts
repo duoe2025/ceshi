@@ -13,6 +13,8 @@ import {
   defaultAttributes, derive, emptyEquipment, reduction, scoreItem, weaponDamage, xpToNext,
 } from '../assets/scripts/core/Stats';
 import { rollItem, rollLoot, RARITY_META } from '../assets/scripts/core/Items';
+import { WorldEngine } from '../assets/scripts/engine/WorldEngine';
+import { DAVID_WORLD } from '../assets/scripts/engine/WorldData';
 
 let finished: FinishStats | null = null;
 const view: IGameView = {
@@ -291,6 +293,37 @@ console.log('\n[8] 装备系统单元校验（稀有度/词缀/评分/掉落）'
   const rareOrBetter = ['rare', 'unique'];
   const sample = rollLoot({ level: 2, lootChance: 1, lootTier: 'rare' });
   check(!!sample && rareOrBetter.indexOf(sample.rarity) >= 0, `掉落稀有度不低于下限（${sample && sample.rarity}）`);
+}
+
+console.log('\n[9] 世界引擎 WorldEngine（互通大世界：解锁/访问/通关/快照）');
+{
+  const w = new WorldEngine(DAVID_WORLD);
+  // 开局：牧场+旷野解锁，以拉谷锁定
+  check(w.isUnlocked('bethlehem') && w.isUnlocked('field'), '开局解锁牧场与旷野');
+  check(!w.isUnlocked('elah'), '以拉谷开局锁定（requires 牧场）');
+  // 可进入：解锁且绑定真实场景
+  check(w.canEnter('bethlehem') && w.canEnter('field'), '牧场/旷野可进入（绑定场景）');
+  check(!w.canEnter('elah'), '锁定节点不可进入');
+  // 进入旷野 → 记为已访问
+  check(w.enter('field') && w.isVisited('field') && w.currentId === 'field', '进入旷野后记为已访问且为当前节点');
+  check(!w.enter('elah'), '进入锁定节点失败');
+  // 通关牧场 → 解锁以拉谷
+  const newly = w.complete('bethlehem');
+  check(w.isCompleted('bethlehem'), '牧场标记为已通关');
+  check(newly.indexOf('elah') >= 0 && w.isUnlocked('elah'), '通关牧场后解锁以拉谷');
+  // 占位节点（scene=null）即便解锁也不可进入
+  check(w.isUnlocked('elah') && !w.canEnter('elah'), '占位节点解锁但不可进入（scene=null）');
+  // 互通邻接
+  const nb = w.neighbors('bethlehem').map((n) => n.id);
+  check(nb.indexOf('field') >= 0 && nb.indexOf('elah') >= 0, '牧场邻接含旷野与以拉谷（互通）');
+  // 进度快照 roundtrip
+  w.saveSnapshot({ level: 3, hp: 18 });
+  check((w.loadSnapshot().level as number) === 3, '进度快照可保存/读取');
+  // 序列化/恢复 roundtrip
+  const restored = WorldEngine.restore(DAVID_WORLD, w.serialize());
+  check(restored.isCompleted('bethlehem') && restored.isUnlocked('elah')
+    && restored.isVisited('field') && (restored.loadSnapshot().hp as number) === 18,
+    '序列化→恢复后通关/解锁/访问/快照一致');
 }
 
 console.log(`\n=== 结果：${assertions - failures}/${assertions} 通过 ===`);

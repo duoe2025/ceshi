@@ -7,9 +7,11 @@
 import { GameCore } from '../core/GameCore';
 import { GameData, TILE, MAP_COLS, MAP_ROWS } from '../core/GameData';
 import { FinishStats, IGameView, Slot } from '../core/types';
-import { CanvasPainter, Ctx2D, cssColor } from './CanvasPainter';
+import { CanvasPainter, Ctx2D } from './CanvasPainter';
+import { CanvasTextLayer } from './CanvasText';
 import * as Sprites from '../Sprites';
-import { rgba } from '../IPainter';
+import { IPainter, rgba } from '../IPainter';
+import { ITextLayer, TextAlign, TextBaseline } from '../ITextLayer';
 
 export const VIEW_W = 800;
 export const VIEW_H = 576;
@@ -32,9 +34,12 @@ export interface FullCtx extends Ctx2D {
 interface Btn { x: number; y: number; w: number; h: number; }
 
 export class CanvasGame implements IGameView {
-  private ctx: FullCtx;
-  private painter: CanvasPainter;
+  private painter: IPainter;
+  private textLayer: ITextLayer;
   core: GameCore;
+
+  /** Phaser 原生路径置 true：飞石拖尾改由原生粒子发射器绘制，drawProjectile 不再自绘拖尾。 */
+  nativeProjectileTrail = false;
 
   private acc = 0;
   private last = 0;
@@ -49,10 +54,27 @@ export class CanvasGame implements IGameView {
   private joyCX = 0; private joyCY = 0; private joyDX = 0; private joyDY = 0;
   private atkId = -1;
 
-  constructor(ctx: FullCtx) {
-    this.ctx = ctx;
-    this.painter = new CanvasPainter(ctx);
+  /**
+   * 两种装配方式：
+   * - 传 Canvas 2D 上下文（浏览器/微信）：内部建 CanvasPainter + CanvasTextLayer。
+   * - 不传（Phaser 原生）：稍后用 setBackend() 注入 PhaserPainter + PhaserTextLayer。
+   */
+  constructor(ctx?: FullCtx) {
+    if (ctx) {
+      this.painter = new CanvasPainter(ctx);
+      this.textLayer = new CanvasTextLayer(ctx);
+    } else {
+      // Phaser 路径：占位，渲染前必须 setBackend()
+      this.painter = null as unknown as IPainter;
+      this.textLayer = null as unknown as ITextLayer;
+    }
     this.core = new GameCore(this);
+  }
+
+  /** 注入/切换绘制后端（Phaser 按层在 world / ui 之间切换）。 */
+  setBackend(painter: IPainter, textLayer: ITextLayer): void {
+    this.painter = painter;
+    this.textLayer = textLayer;
   }
 
   start(): void {
@@ -96,25 +118,115 @@ export class CanvasGame implements IGameView {
     this.render();
   }
 
+  /* ---------------- Phaser 原生路径（推进逻辑 + 分层渲染） ----------------
+   * Phaser 由 WorldScene/UIScene 分别驱动：先 step() 推进逻辑，再
+   * renderWorld()（世界层，配 Phaser 相机滚动）与 renderUI()（屏幕层叠加）。 */
+
+  /** 仅推进逻辑与计时（不渲染）。供 Phaser WorldScene 每帧调用。 */
+  step(): void {
+    const t = this.now();
+    let dt = (t - this.last) / 1000;
+    this.last = t;
+    if (dt > 0.1) dt = 0.1;
+    this.animClock += dt;
+    if (this.toastTimer > 0) this.toastTimer -= dt;
+    if (!this.finished) {
+      this.acc += dt;
+      let guard = 0;
+      while (this.acc >= STEP && guard++ < 5) { this.core.update(); this.acc -= STEP; }
+    }
+  }
+
+  /** 当前相机滚动（已钳制、四舍五入、不含抖动）——交给 Phaser 相机。 */
+  cameraScroll(): { camX: number; camY: number } { return this.camera(0); }
+
+  get finishedFlag(): boolean { return this.finished; }
+  get isTouchUI(): boolean { return this.touchUI; }
+
+  /**
+   * 世界层渲染：在「世界坐标」绘制地图/角色/怪物/特效/飘字（不做相机偏移，
+   * 由 Phaser 相机负责滚动）。瓦片用真实相机范围做剔除。不含夜战/HUD 屏幕叠加。
+   */
+  renderWorld(): void {
+    const G = this.core;
+    const p = this.painter;
+    const { camX, camY } = this.cameraScroll();
+
+    // 瓦片：按相机可视范围剔除，但绘制在世界坐标
+    const c0 = Math.max(0, Math.floor(camX / TILE));
+    const r0 = Math.max(0, Math.floor(camY / TILE));
+    const c1 = Math.min(MAP_COLS - 1, c0 + Math.ceil(VIEW_W / TILE) + 1);
+    const r1 = Math.min(MAP_ROWS - 1, r0 + Math.ceil(VIEW_H / TILE) + 1);
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) Sprites.tile(p, G.map[r][c], c * TILE, r * TILE);
+    }
+
+    GameData.foldSheep.forEach((s) => Sprites.sheep(p, s.c * TILE, s.r * TILE + 4, 2));
+    G.lostSheep.forEach((s) => { if (!s.taken) Sprites.sheep(p, s.c * TILE, s.r * TILE + 4, 2); });
+    this.drawFollowers(0, 0);
+
+    const jesse = GameData.npcs[0];
+    Sprites.jesse(p, jesse.c * TILE, jesse.r * TILE, 2);
+    this.nameTag(jesse.name, jesse.c * TILE + 16, jesse.r * TILE - 4, rgba(244, 236, 216));
+    if (G.canTalkToJesse()) {
+      const bob = Math.sin(this.animClock * 5) * 2;
+      this.text('空格/点击 ▼', jesse.c * TILE + 16, jesse.r * TILE - 22 + bob, 14, rgba(224, 178, 80), 'center', 'middle');
+    }
+
+    this.drawChests(0, 0);
+    this.drawGroundItems(0, 0);
+    this.drawMouseMarkers(0, 0);
+    G.projectiles.forEach((pr) => this.drawProjectile(pr, 0, 0));
+    G.ambient.forEach((e) => this.drawEnemyEntity(e, 0, 0));
+    if (G.enemy) this.drawEnemyEntity(G.enemy, 0, 0);
+    this.drawEffects(0, 0);
+
+    let davidAlpha = 255;
+    if (G.playerHurt > 0 && Math.floor(G.playerHurt / 3) % 2 === 0) davidAlpha = 115;
+    Sprites.david(p, G.player.x, G.player.y, 2, G.player.facing, G.player.frame);
+    if (davidAlpha < 255) p.fillRect(G.player.x + 14, G.player.y + 2, 20, 30, rgba(120, 30, 40, 90));
+
+    this.drawPopups(0, 0);
+
+    if (G.nearChest()) {
+      const bob = Math.sin(this.animClock * 5) * 2;
+      this.text('空格 开启宝箱', G.player.x + 16, G.player.y - 18 + bob, 13, rgba(255, 224, 120), 'center', 'middle');
+    }
+  }
+
+  /** 屏幕层渲染：HUD/对白/面板/提示/结算（固定屏幕坐标）。
+   * 注：夜战压暗已由 WorldScene 的原生 Rectangle（仅暗世界层、不暗 HUD）承担。 */
+  renderUI(): void {
+    const G = this.core;
+
+    if (!this.finished) {
+      this.text(`目标：${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));
+      this.drawHpBar(G);
+      this.drawStatsHud(G);
+      const showWeapon = G.combatActive() || G.phase === 'q2' || G.phase === 'q3';
+      if (showWeapon) this.drawWeaponHud();
+    }
+
+    this.drawDialogue();
+    this.drawQuestLog();
+    this.drawEquipPanel();
+    if (this.toastTimer > 0) this.drawToast();
+    if (this.touchUI && !this.finished) this.drawTouchControls();
+    if (this.finished) this.drawEnd();
+  }
+
   /* ---------------- 文本工具 ---------------- */
   private text(str: string, x: number, y: number, size: number, color: string,
-    align: 'left' | 'center' = 'left', baseline: 'top' | 'middle' = 'top'): void {
-    const c = this.ctx;
-    c.font = `${size}px sans-serif`;
-    c.textAlign = align;
-    c.textBaseline = baseline;
-    c.fillStyle = cssColor(color);
-    c.fillText(str, x, y);
+    align: TextAlign = 'left', baseline: TextBaseline = 'top'): void {
+    this.textLayer.text(str, x, y, size, color, align, baseline);
   }
 
   private wrap(str: string, size: number, maxW: number): string[] {
-    const c = this.ctx;
-    c.font = `${size}px sans-serif`;
     const out: string[] = [];
     str.split('\n').forEach((para) => {
       let line = '';
       for (const ch of para) {
-        if (c.measureText(line + ch).width > maxW && line) { out.push(line); line = ch; }
+        if (this.textLayer.measureText(line + ch, size) > maxW && line) { out.push(line); line = ch; }
         else line += ch;
       }
       out.push(line);
@@ -270,10 +382,13 @@ export class CanvasGame implements IGameView {
 
   private drawProjectile(pr: { x: number; y: number; trail: Array<{ x: number; y: number }> }, camX: number, camY: number): void {
     const p = this.painter;
-    pr.trail.forEach((t, i) => {
-      const a = Math.min(170, 40 + i * 32);
-      p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
-    });
+    // Phaser 原生路径用粒子发射器画拖尾；其余路径（浏览器/微信 Canvas）仍自绘拖尾。
+    if (!this.nativeProjectileTrail) {
+      pr.trail.forEach((t, i) => {
+        const a = Math.min(170, 40 + i * 32);
+        p.fillCircle(t.x - camX, t.y - camY, 2 + i * 0.4, rgba(200, 195, 175, a));
+      });
+    }
     const x = pr.x - camX; const y = pr.y - camY;
     p.fillCircle(x, y, 4, rgba(207, 202, 187));
     p.fillCircle(x + 1, y + 1, 2, rgba(155, 150, 132));
@@ -534,8 +649,7 @@ export class CanvasGame implements IGameView {
 
   private drawToast(): void {
     const y = 92;
-    this.ctx.font = '16px sans-serif';
-    const w = Math.min(560, this.ctx.measureText(this.toastMsg).width + 28);
+    const w = Math.min(560, this.textLayer.measureText(this.toastMsg, 16) + 28);
     this.painter.fillRect((VIEW_W - w) / 2, y - 16, w, 30, rgba(14, 11, 22, 200));
     this.text(this.toastMsg, VIEW_W / 2, y, 16, rgba(255, 244, 214), 'center', 'middle');
   }
