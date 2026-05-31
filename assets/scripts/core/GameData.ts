@@ -5,7 +5,7 @@
  * ============================================================ */
 
 import {
-  DialogueLine, EnemyDef, LostSheepData, TilePos, WeaponDef,
+  DialogueLine, EnemyDef, LostSheepData, PsalmFragment, TilePos, WeaponDef,
 } from './types';
 
 export const TILE = 32;
@@ -208,8 +208,32 @@ export const GameData = {
   } as Record<string, WeaponDef>,
   weaponOrder: ['sling', 'staff', 'harp'],
 
+  /* 诗篇碎片（儿童版「先经历、再听见诗篇」收集物，非技能咒语） */
+  psalms: {
+    ps23: {
+      id: 'ps23', ref: '诗篇 23 篇', name: '耶和华是我的牧者',
+      theme: '神看顾我，像牧人看顾羊。',
+    },
+    ps8: {
+      id: 'ps8', ref: '诗篇 8 篇', name: '星空下的勇气',
+      theme: '夜里仰望星空，便知神也看见我。',
+    },
+  } as Record<string, PsalmFragment>,
+
   /* 对白脚本 */
   dialogue: {
+    /* 穿越开场：现代孩子翻开圣经 → 卷轴发光 → 进入伯利恒 */
+    prologue: [
+      { name: '旁白', text: '一个现代的孩子，在灯下翻开一本旧旧的圣经。' },
+      { name: '孩子', text: '大卫……一个放羊的小孩，真的能打败巨人吗？' },
+      { name: '旁白', text: '书页忽然发出温暖的光，卷轴缓缓展开——' },
+      { name: '旁白', text: '风声、羊叫、青草的气息扑面而来。你穿越进了三千年前的伯利恒。' },
+      { name: '穿越小助手', text: '看！那个放羊的少年，就是大卫。我们一起看看他的故事吧。' },
+    ],
+    /* 安静祷告（按 P）：非魔法，只是害怕时转向神 */
+    quiet: [
+      { name: '旁白', text: '大卫安静下来。风声变小了，他想起神过去的看顾。' },
+    ],
     intro: [
       { name: '旁白', text: '伯利恒城外的牧场，清晨的薄雾还未散去。' },
       { name: '旁白', text: '你是耶西最小的儿子——大卫，今天要照看家中的羊群。' },

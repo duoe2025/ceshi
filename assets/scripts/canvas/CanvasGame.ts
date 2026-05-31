@@ -202,6 +202,7 @@ export class CanvasGame implements IGameView {
     if (!this.finished) {
       this.text(`目标：${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));
       this.drawHpBar(G);
+      this.drawChildHud(G);
       this.drawStatsHud(G);
       const showWeapon = G.combatActive() || G.phase === 'q2' || G.phase === 'q3';
       if (showWeapon) this.drawWeaponHud();
@@ -314,6 +315,7 @@ export class CanvasGame implements IGameView {
     // HUD
     this.text(`目标：${G.objectiveText()}`, 10, 8, 16, rgba(255, 222, 120));
     this.drawHpBar(G);
+    this.drawChildHud(G);
     this.drawStatsHud(G);
     const showWeapon = G.combatActive() || G.phase === 'q2' || G.phase === 'q3';
     if (showWeapon) this.drawWeaponHud();
@@ -607,6 +609,30 @@ export class CanvasGame implements IGameView {
     this.text(`HP ${Math.max(0, G.player.hp)} / ${G.player.maxHp}`, x + w + 8, y + 7, 14, rgba(244, 236, 216), 'left', 'middle');
   }
 
+  /* ---- 儿童版灵魂层 HUD：恐惧条 + 诗篇碎片计数 + 祷告提示 ---- */
+  private drawChildHud(G: GameCore): void {
+    if (!G.childMode) return;
+    // 恐惧条（仅在有恐惧或战斗/夜战时显示）
+    const showFear = G.fear > 0.5 || G.combatActive() || G.phase === 'q3';
+    if (showFear) {
+      const x = 10; const y = 86; const w = 160; const h = 12;
+      this.painter.fillRect(x - 2, y - 2, w + 4, h + 4, rgba(14, 11, 22, 160));
+      this.painter.fillRect(x, y, w, h, rgba(28, 24, 44));
+      const pct = G.fearPct();
+      const col = G.feared() ? rgba(150, 90, 220) : rgba(96, 78, 168);
+      this.painter.fillRect(x, y, w * pct, h, col);
+      this.text('恐惧', x + w + 8, y + 6, 13, G.feared() ? rgba(190, 150, 250) : rgba(180, 170, 210), 'left', 'middle');
+      // 害怕时提示按 P 祷告
+      if (G.feared()) {
+        this.text('按 P 安静祷告，恐惧会退去', x, y + 18, 13, rgba(190, 150, 250), 'left', 'top');
+      }
+    }
+    // 诗篇碎片计数（右上角，靠左对齐定位以兼容文本层）
+    if (G.psalms.length > 0) {
+      this.text(`诗篇碎片 x${G.psalms.length}`, VIEW_W - 150, 10, 14, rgba(255, 224, 150), 'left', 'top');
+    }
+  }
+
   private drawWeaponHud(): void {
     const G = this.core;
     const order = GameData.weaponOrder;
@@ -716,6 +742,7 @@ export class CanvasGame implements IGameView {
       case '3': c.setWeapon('harp'); return;
       case 'k': case 'K': c.cycleWeapon(); return;
       case 'q': case 'Q': c.toggleQuestLog(); return;
+      case 'p': case 'P': if (!this.finished) c.pray(); return; // 安静祷告（降恐惧·非魔法）
       case 'r': case 'R': if (this.finished) this.start(); return;
       default: break;
     }
