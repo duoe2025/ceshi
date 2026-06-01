@@ -459,7 +459,9 @@
     const r1 = Math.min(MAP_ROWS - 1, r0 + Math.ceil(VIEW_H / TILE) + 1);
     for (let r = Math.max(0, r0); r <= r1; r++) {
       for (let c = Math.max(0, c0); c <= c1; c++) {
-        Sprites.tile(ctx, map[r][c], c * TILE - camX, r * TILE - camY);
+        const sx = c * TILE - camX, sy = r * TILE - camY;
+        // 有图集就用图片，缺图片回退到程序化绘制
+        if (!Assets.drawTile(ctx, map[r][c], sx, sy)) Sprites.tile(ctx, map[r][c], sx, sy);
       }
     }
 
@@ -507,7 +509,11 @@
 
     // 大卫
     if (G.playerHurt > 0 && Math.floor(G.playerHurt / 3) % 2 === 0) ctx.globalAlpha = 0.45;
-    Sprites.david(ctx, G.player.x - camX, G.player.y - camY, 2, G.player.facing, G.player.frame);
+    {
+      const px = G.player.x - camX, py = G.player.y - camY;
+      if (!Assets.drawDavid(ctx, px, py, G.player.facing, G.player.frame))
+        Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame);
+    }
     ctx.globalAlpha = 1;
 
     // 夜幕（任务三期间）
@@ -716,5 +722,6 @@
   document.getElementById('restart-btn').addEventListener('click', startGame);
 
   UI.initDialogue();
+  Assets.load();            // 异步加载图片素材；缺图片时自动回退到程序化绘制
   requestAnimationFrame(loop);
 })();

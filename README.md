@@ -38,10 +38,11 @@ python3 -m http.server 8000
 index.html        页面骨架与各 UI 层
 css/style.css     样式
 js/data.js        地图、瓦片、实体、任务、对白等静态数据
-js/sprites.js     程序化像素绘制（瓦片与角色，无图片资源）
+js/sprites.js     程序化像素绘制（无图片时的回退绘制）
+js/assets.js      图片素材渲染管线（有图片用图片，缺图片回退程序化绘制）
 js/ui.js          对白、HUD、提示、任务日志
-js/battle.js      回合制战斗
-js/game.js        主引擎：渲染、移动、互动、任务流程、输入
+js/game.js        主引擎：渲染、移动、ARPG 即时战斗、任务流程、输入
+assets/           图片素材（tileset.png / david.png，规范见 assets/README.md）
 ```
 
 ## 后续可扩展
