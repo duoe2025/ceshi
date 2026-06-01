@@ -103,6 +103,13 @@ export class GameCore {
   shake = 0;
   playerHurt = 0;
 
+  /* ---- 儿童版灵魂层（M10）：穿越开场 / 恐惧条 / 安静祷告 / 诗篇碎片 ---- */
+  childMode = true;        // 儿童版：开场穿越叙事 + 恐惧条影响 + 诗篇收集
+  fear = 0;                // 恐惧值 0~maxFear：夜战/受击升高，满则移动慢、瞄准晃
+  readonly maxFear = 100;
+  prayCD = 0;              // 安静祷告冷却帧（避免连点）
+  psalms: string[] = [];   // 已收集的诗篇碎片 id（去重）
+
   derived: DerivedStats = derive(this.player.attr, this.player.equip);
 
   dlg: DialogueState = { active: false, queue: [], current: null, onDone: null };
@@ -118,7 +125,11 @@ export class GameCore {
     this.reset();
     this.running = true;
     this.busy = true;
-    this.showDialogue(GameData.dialogue.intro, () => {
+    // 儿童版：先放穿越开场（现代孩子翻开圣经→进入伯利恒），再接清晨牧场旁白
+    const opening = this.childMode
+      ? [...GameData.dialogue.prologue, ...GameData.dialogue.intro]
+      : GameData.dialogue.intro;
+    this.showDialogue(opening, () => {
       this.view.toast('用方向键 / WASD 走到父亲身边，按空格交谈');
       this.busy = false;
     });
@@ -162,6 +173,9 @@ export class GameCore {
     this.hintShown = false;
     this.shake = 0;
     this.playerHurt = 0;
+    this.fear = 0;
+    this.prayCD = 0;
+    this.psalms = [];
     this.input = { left: false, right: false, up: false, down: false, attack: false };
     this.moveTarget = null;
     this.attackTarget = null;
@@ -176,10 +190,61 @@ export class GameCore {
   /** 每帧推进一次世界（固定步长）。 */
   update(): void {
     if (!this.running) return;
+    this.tickFear(); // 恐惧/祷告冷却始终推进（即便在对白/面板中）
     if (this.busy || this.dlg.active || this.questLogOpen || this.equipPanelOpen) return;
     this.updatePlayer();
     this.updateCombat();
   }
+
+  /* ---------------- 儿童版灵魂层：恐惧条 / 安静祷告 / 诗篇碎片 ---------------- */
+  /** 恐惧随时间缓降；无敌人在场时恢复更快。祷告冷却递减。 */
+  private tickFear(): void {
+    if (this.prayCD > 0) this.prayCD--;
+    if (this.fear > 0) {
+      const calm = this.combatActive() ? 0.04 : 0.16; // 战斗中恢复慢
+      this.fear = Math.max(0, this.fear - calm);
+    }
+  }
+
+  /** 升高恐惧（受击、夜幕、巨兽逼近时调用），钳制在 0~maxFear。 */
+  addFear(n: number): void {
+    this.fear = Math.max(0, Math.min(this.maxFear, this.fear + n));
+  }
+
+  fearPct(): number { return this.fear / this.maxFear; }
+  /** 恐惧偏高（>=70%）：移动变慢、瞄准晃动。 */
+  feared(): boolean { return this.fearPct() >= 0.7; }
+  /** 恐惧导致的移动速度乘数（越怕越慢，最低 0.55）。 */
+  private fearSpeedMul(): number {
+    if (!this.childMode || !this.feared()) return 1;
+    return 0.55 + (1 - this.fearPct()) * 1.5; // fear=70%→~1.0 起步，满恐惧→0.55
+  }
+
+  /** 安静祷告（按 P）：非魔法——不加攻击力，只让恐惧下降、心神安定。
+   * 返回是否成功触发（冷却中或不可操作时返回 false）。 */
+  pray(): boolean {
+    if (!this.childMode) return false; // 安静祷告属儿童版灵魂层，标准模式不启用
+    if (!this.running || this.busy || this.dlg.active) return false;
+    if (this.questLogOpen || this.equipPanelOpen) return false;
+    if (this.prayCD > 0) return false;
+    this.prayCD = 90;
+    const before = this.fear;
+    this.addFear(-45);
+    this.view.toast(before > 0 ? '你安静下来，向神祷告——恐惧渐渐退去' : '你安静片刻，心里更有力量', 1600);
+    return true;
+  }
+
+  /** 收集诗篇碎片（去重）。返回是否为新碎片。 */
+  collectPsalm(id: string): boolean {
+    if (this.psalms.indexOf(id) >= 0) return false;
+    const p = GameData.psalms[id];
+    if (!p) return false;
+    this.psalms.push(id);
+    this.view.toast(`解锁诗篇碎片 · ${p.ref}「${p.name}」`, 2000);
+    return true;
+  }
+
+  hasPsalm(id: string): boolean { return this.psalms.indexOf(id) >= 0; }
 
   /* ---------------- 派生属性 ---------------- */
   recomputeDerived(fullHeal = false): void {
@@ -197,8 +262,20 @@ export class GameCore {
     }
   }
 
-  /* ---------------- 任务目标文本 ---------------- */
+  /* ---------------- 任务目标文本 ----------------
+   * 儿童版（圣经卷轴）用「意义化」写法：强调保护与心，而非击杀。 */
   objectiveText(): string {
+    if (this.childMode) {
+      switch (this.phase) {
+        case 'intro': return '去和父亲耶西谈谈';
+        case 'q1': return `找回迷路的小羊，学习牧人的心  ${this.sheepCollected}/3`;
+        case 'q1done': return '回去把好消息告诉父亲耶西';
+        case 'q2': return '守护羊群，挡住山洞口的猛狮（弹弓/杖杆）';
+        case 'q3': return '夜里别害怕——按 P 安静祷告，用「弹琴赞美」(3) 驱散黑暗';
+        case 'done': return '第一章完成！';
+        default: return '—';
+      }
+    }
     switch (this.phase) {
       case 'intro': return '去和父亲耶西谈谈';
       case 'q1': return `找回走失的羊  ${this.sheepCollected}/3`;
@@ -330,9 +407,10 @@ export class GameCore {
     else if (dy < 0) this.player.facing = 'up';
     else if (dy > 0) this.player.facing = 'down';
 
-    const nx = this.player.x + dx * SPEED;
+    const sp = SPEED * this.fearSpeedMul(); // 恐惧偏高时移动变慢（儿童版）
+    const nx = this.player.x + dx * sp;
     if (!this.blocked(nx, this.player.y)) this.player.x = nx;
-    const ny = this.player.y + dy * SPEED;
+    const ny = this.player.y + dy * sp;
     if (!this.blocked(this.player.x, ny)) this.player.y = ny;
 
     if (this.player.moving) {
@@ -376,6 +454,7 @@ export class GameCore {
           this.phase = 'q1done';
           this.busy = true;
           this.clearAmbient();
+          if (this.childMode) this.collectPsalm('ps23'); // 牧羊护羊 → 诗23「耶和华是我的牧者」
           this.showDialogue(GameData.dialogue.sheepFound, () => {
             this.view.toast('三只羊都找回来了，回去找父亲');
             this.busy = false;
@@ -599,6 +678,7 @@ export class GameCore {
     this.player.hp = Math.max(0, this.player.hp - dmg);
     this.pushPopup(this.player.x + TILE / 2, this.player.y, `-${dmg}`, '#ff7a7a');
     this.shake = 6; this.playerHurt = 12;
+    if (this.childMode) this.addFear(10 + dmg); // 受击时恐惧上升
     if (this.player.hp <= 0) this.playerDown();
   }
 
@@ -649,6 +729,11 @@ export class GameCore {
           this.spawnEnemy('spirit');
           this.spiritActive = true;
           this.weapon = 'harp';
+          if (this.childMode) {
+            this.addFear(60);            // 夜幕骤降：恐惧陡升
+            this.collectPsalm('ps8');    // 星空夜晚 → 诗8「星空下的勇气」
+            this.view.toast('害怕时按 P 安静祷告，恐惧会退去', 2400);
+          }
           this.view.toast('夜战！用「弹琴赞美」(3) 驱散邪灵', 2200);
           this.busy = false;
         });

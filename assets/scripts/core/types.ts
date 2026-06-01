@@ -209,6 +209,15 @@ export interface FinishStats {
   level: number;
 }
 
+/** 诗篇碎片：儿童版「先经历、再听见诗篇」的收集物。
+ * 不是技能咒语，只承载属灵主题与经文出处，用于卷轴收藏。 */
+export interface PsalmFragment {
+  id: string;
+  ref: string; // 经文出处，如「诗篇 23 篇」
+  name: string; // 主题名，如「耶和华是我的牧者」
+  theme: string; // 一句话属灵主题
+}
+
 /** 视图回调：核心逻辑通过它向渲染层发出瞬时事件（提示气泡 / 通关）。 */
 export interface IGameView {
   toast(msg: string, ms?: number): void;

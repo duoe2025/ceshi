@@ -326,6 +326,51 @@ console.log('\n[9] 世界引擎 WorldEngine（互通大世界：解锁/访问/�
     '序列化→恢复后通关/解锁/访问/快照一致');
 }
 
+console.log('\n[10] 儿童版灵魂层（穿越开场 / 恐惧条 / 安静祷告 / 诗篇碎片）');
+{
+  // 主流程跑完后：牧羊护羊→诗23，夜幕降临→诗8，应已自动收集
+  check(core.hasPsalm('ps23'), '找齐羊后自动收集诗23碎片');
+  check(core.hasPsalm('ps8'), '入夜后自动收集诗8碎片');
+  check(core.psalms.length === 2, `共收集 2 枚诗篇碎片（实际 ${core.psalms.length}）`);
+
+  // 独立实例做确定性单测
+  const c2 = new GameCore({ toast: () => {}, onFinish: () => {} });
+  c2.ambientEnabled = false;
+  c2.start();
+  check(!!c2.currentLine() && c2.currentLine()!.text.indexOf('圣经') >= 0,
+    '儿童版开场先播放「现代孩子翻开圣经」穿越旁白');
+  while (c2.dialogueActive()) c2.advanceDialogue();
+
+  // 恐惧条：封顶 + feared 阈值
+  c2.addFear(200);
+  check(c2.fear === c2.maxFear, '恐惧值上限封顶 maxFear');
+  check(c2.feared(), '恐惧满时 feared()=true');
+
+  // 安静祷告：降恐惧但非魔法（不改攻击力）
+  const atkBefore = c2.player.atk;
+  check(c2.pray() && c2.fear < c2.maxFear, '安静祷告降低恐惧');
+  check(c2.player.atk === atkBefore, '祷告不改变攻击力（非魔法）');
+  check(!c2.pray(), '祷告冷却中无法连续触发');
+
+  // 恐惧随时间缓降
+  const f0 = c2.fear;
+  for (let i = 0; i < 120; i++) c2.update();
+  check(c2.fear < f0, '恐惧随时间缓降');
+
+  // 诗篇碎片去重
+  check(c2.collectPsalm('ps23'), '收集新诗篇碎片返回 true');
+  check(!c2.collectPsalm('ps23'), '重复收集同一碎片返回 false（去重）');
+
+  // 关闭儿童模式：无穿越开场、任务文案回到标准版
+  const c3 = new GameCore({ toast: () => {}, onFinish: () => {} });
+  c3.childMode = false;
+  c3.start();
+  check(!!c3.currentLine() && c3.currentLine()!.text.indexOf('圣经') < 0,
+    '非儿童模式不播放穿越开场');
+  check(c3.objectiveText().indexOf('牧人的心') < 0, '非儿童模式任务文案为标准版');
+  check(!c3.pray(), '非儿童模式安静祷告被守卫拦截（pray 返回 false）');
+}
+
 console.log(`\n=== 结果：${assertions - failures}/${assertions} 通过 ===`);
 if (failures > 0) { console.error(`有 ${failures} 项失败`); process.exit(1); }
 console.log('全部通过 ✓\n');
