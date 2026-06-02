@@ -143,10 +143,14 @@
     const ny = G.player.y + dy * SPEED;
     if (!blocked(G.player.x, ny)) G.player.y = ny;
 
-    // 行走动画
+    // 行走动画：在图集声明的行走帧数内循环（缺图回退时只用到第 0/1 帧）
     if (G.player.moving) {
       G.player.animTimer++;
-      if (G.player.animTimer > 8) { G.player.frame ^= 1; G.player.animTimer = 0; }
+      if (G.player.animTimer > 5) {
+        const wf = Assets.manifest.david.walkCols.length;
+        G.player.frame = (G.player.frame + 1) % wf;
+        G.player.animTimer = 0;
+      }
     } else { G.player.frame = 0; }
 
     checkSheepPickup();
@@ -512,7 +516,7 @@
     {
       const px = G.player.x - camX, py = G.player.y - camY;
       if (!Assets.drawDavid(ctx, px, py, G.player.facing, G.player.frame))
-        Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame);
+        Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame & 1);
     }
     ctx.globalAlpha = 1;
 

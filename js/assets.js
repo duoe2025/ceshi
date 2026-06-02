@@ -23,7 +23,7 @@ const Assets = (() => {
   const manifest = {
     tileset: {
       src: 'assets/tileset.png',
-      cell: 48,
+      cell: 64,
       map: {
         [T.GRASS]:  [0, 0], [T.TGRASS]: [1, 0], [T.FLOWER]: [2, 0],
         [T.PATH]:   [3, 0], [T.FOLD]:   [4, 0], [T.HILL]:   [5, 0],
@@ -33,11 +33,11 @@ const Assets = (() => {
     },
     david: {
       src: 'assets/david.png',
-      cell: 48,
+      cell: 64,
       // 行索引：每个朝向一行（与重生成提示词约定一致）
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
-      // 行走动画所在列（与 game.js 的 player.frame: 0/1 对应）
-      walkCols: [0, 1],
+      // 行走动画所在列（与 game.js 的 player.frame 循环对应）
+      walkCols: [0, 1, 2, 3, 4, 5],
     },
   };
 
