@@ -38,6 +38,9 @@
     hintShown: false,        // 是否已提示“物理打不动邪灵”
     shake: 0,                // 屏幕震动帧
     playerHurt: 0,           // 玩家受击闪烁帧
+    playerAction: '',        // sling / staff / harp
+    playerActionTimer: 0,
+    playerActionMax: 0,
   };
 
   const SPEED = 2.4;
@@ -73,6 +76,9 @@
     G.hintShown = false;
     G.shake = 0;
     G.playerHurt = 0;
+    G.playerAction = '';
+    G.playerActionTimer = 0;
+    G.playerActionMax = 0;
     G.keys = {};
     UI.setHp(G.player.hp, G.player.maxHp);
     updateObjective();
@@ -147,7 +153,7 @@
     if (G.player.moving) {
       G.player.animTimer++;
       if (G.player.animTimer > 5) {
-        const wf = Assets.manifest.david.walkCols.length;
+        const wf = Assets.manifest.david.cols.length;
         G.player.frame = (G.player.frame + 1) % wf;
         G.player.animTimer = 0;
       }
@@ -252,6 +258,9 @@
     if (G.attackCD > 0) return;
     const wpn = GameData.weapons[G.weapon];
     G.attackCD = wpn.cd;
+    G.playerAction = G.weapon;
+    G.playerActionMax = G.weapon === 'harp' ? 24 : 12;
+    G.playerActionTimer = G.playerActionMax;
     const pc = playerCenter();
     const dir = facingVec(G.player.facing);
 
@@ -306,6 +315,7 @@
     G.player.hp = Math.max(0, G.player.hp - dmg);
     UI.setHp(G.player.hp, G.player.maxHp);
     G.shake = 6; G.playerHurt = 12;
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
     if (G.player.hp <= 0) playerDown();
   }
 
@@ -350,6 +360,7 @@
       e.hp = e.maxHp; e.atk = def.atk; e.x = pos.c * TILE; e.y = pos.r * TILE;
       e.touchCD = 0; e.dead = false; e.greeted = true; e.hurt = 0;
     }
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
     let line;
     if (G.phase === 'q3') {
       G.player.x = 9 * TILE; G.player.y = 23 * TILE; G.player.facing = 'up';
@@ -429,6 +440,8 @@
     updateEffects();
     if (G.shake > 0) G.shake--;
     if (G.playerHurt > 0) G.playerHurt--;
+    if (G.playerActionTimer > 0) G.playerActionTimer--;
+    else G.playerAction = '';
   }
 
   function finishChapter() {
@@ -515,7 +528,19 @@
     if (G.playerHurt > 0 && Math.floor(G.playerHurt / 3) % 2 === 0) ctx.globalAlpha = 0.45;
     {
       const px = G.player.x - camX, py = G.player.y - camY;
-      if (!Assets.drawDavid(ctx, px, py, G.player.facing, G.player.frame))
+      let action = 'walk', frame = G.player.frame;
+      if (G.playerHurt > 0) {
+        action = 'hurt';
+        frame = Math.floor(G.playerHurt / 4) & 1;
+      } else if (G.playerActionTimer > 0 && G.playerAction) {
+        action = G.playerAction;
+        const cols = Assets.manifest[
+          action === 'sling' ? 'davidSling' : action === 'staff' ? 'davidStaff' : 'davidHarp'
+        ].cols.length;
+        const max = Math.max(1, G.playerActionMax);
+        frame = Math.min(cols - 1, Math.floor((1 - G.playerActionTimer / max) * cols));
+      }
+      if (!Assets.drawDavid(ctx, px, py, G.player.facing, frame, action))
         Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame & 1);
     }
     ctx.globalAlpha = 1;
