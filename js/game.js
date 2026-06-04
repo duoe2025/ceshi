@@ -19,7 +19,7 @@
     running: false,
     phase: 'intro',          // intro / q1 / q1done / q2 / q3 / done
     player: { x: 0, y: 0, facing: 'down', hp: 20, maxHp: 20, atk: 5,
-              moving: false, animTimer: 0, frame: 0 },
+              moving: false, running: false, animTimer: 0, frame: 0 },
     keys: {},
     lostSheep: [],
     sheepCollected: 0,
@@ -38,9 +38,12 @@
     hintShown: false,        // 是否已提示“物理打不动邪灵”
     shake: 0,                // 屏幕震动帧
     playerHurt: 0,           // 玩家受击闪烁帧
-    playerAction: '',        // sling / staff / harp
+    playerAction: '',        // sling / staff / harp / pray
     playerActionTimer: 0,
     playerActionMax: 0,
+    playerDownTimer: 0,      // 战败倒地动画帧
+    playerDownMax: 0,
+    idleTimer: 0, idleFrame: 0,   // 站立微动作
   };
 
   const SPEED = 2.4;
@@ -79,6 +82,10 @@
     G.playerAction = '';
     G.playerActionTimer = 0;
     G.playerActionMax = 0;
+    G.playerDownTimer = 0;
+    G.playerDownMax = 0;
+    G.idleTimer = 0; G.idleFrame = 0;
+    G.player.running = false;
     G.keys = {};
     UI.setHp(G.player.hp, G.player.maxHp);
     updateObjective();
@@ -136,6 +143,10 @@
     if (G.keys['down']) dy += 1;
 
     G.player.moving = (dx !== 0 || dy !== 0);
+    G.player.running = G.player.moving && !!G.keys['run'];
+    if (G.player.moving && G.playerAction === 'pray') {
+      G.playerAction = ''; G.playerActionTimer = 0;
+    }
     if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
 
     if (dx < 0) G.player.facing = 'left';
@@ -143,21 +154,32 @@
     else if (dy < 0) G.player.facing = 'up';
     else if (dy > 0) G.player.facing = 'down';
 
-    // 分轴移动，可贴墙滑动
-    const nx = G.player.x + dx * SPEED;
+    // 分轴移动，可贴墙滑动；按住 Shift 奔跑加速
+    const spd = G.player.running ? SPEED * 1.6 : SPEED;
+    const nx = G.player.x + dx * spd;
     if (!blocked(nx, G.player.y)) G.player.x = nx;
-    const ny = G.player.y + dy * SPEED;
+    const ny = G.player.y + dy * spd;
     if (!blocked(G.player.x, ny)) G.player.y = ny;
 
-    // 行走动画：在图集声明的行走帧数内循环（缺图回退时只用到第 0/1 帧）
+    // 行走/奔跑动画；站立时走 idle 微动作（缺图都会回退）
     if (G.player.moving) {
+      G.idleTimer = 0; G.idleFrame = 0;
       G.player.animTimer++;
-      if (G.player.animTimer > 5) {
-        const wf = Assets.manifest.david.cols.length;
+      const step = G.player.running ? 4 : 6;
+      if (G.player.animTimer > step) {
+        const wf = Assets.davidCols(G.player.running ? 'run' : 'walk');
         G.player.frame = (G.player.frame + 1) % wf;
         G.player.animTimer = 0;
       }
-    } else { G.player.frame = 0; }
+    } else {
+      G.player.frame = 0;
+      G.idleTimer++;
+      if (G.idleTimer > 12) {
+        const idf = Assets.davidCols('idle');
+        G.idleFrame = (G.idleFrame + 1) % idf;
+        G.idleTimer = 0;
+      }
+    }
 
     checkSheepPickup();
   }
@@ -251,6 +273,17 @@
     const order = GameData.weaponOrder;
     const i = order.indexOf(G.weapon);
     setWeapon(order[(i + 1) % order.length]);
+  }
+
+  // 祈祷 emote（闭目双手合十）：非战斗状态下按 P 触发
+  function startPray() {
+    if (!G.running || G.busy || G.enemy) return;
+    if (UI.dialogueActive() || UI.questLogOpen()) return;
+    if (G.playerDownTimer > 0 || G.playerHurt > 0) return;
+    G.playerAction = 'pray';
+    G.playerActionMax = 60;
+    G.playerActionTimer = 60;
+    UI.toast('大卫闭目祈祷……', 1000);
   }
 
   function tryAttack() {
@@ -348,9 +381,17 @@
     }
   }
 
+  // 被击倒：先播放倒地动画，再进入复活/退守流程
   function playerDown() {
     G.busy = true;
     G.projectiles = []; G.effects = [];
+    G.playerHurt = 0;
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
+    G.playerDownMax = 78;
+    G.playerDownTimer = 78;
+  }
+
+  function playerDownResolve() {
     G.player.hp = G.player.maxHp;
     UI.setHp(G.player.hp, G.player.maxHp);
     const e = G.enemy;
@@ -529,16 +570,26 @@
     {
       const px = G.player.x - camX, py = G.player.y - camY;
       let action = 'walk', frame = G.player.frame;
-      if (G.playerHurt > 0) {
+      if (G.playerDownTimer > 0) {
+        // 被击倒：倒地动画，最后一帧停在地上
+        action = 'down';
+        const cols = Assets.davidCols('down');
+        const prog = 1 - G.playerDownTimer / Math.max(1, G.playerDownMax);
+        frame = Math.min(cols - 1, Math.floor(prog * cols));
+      } else if (G.playerHurt > 0) {
         action = 'hurt';
         frame = Math.floor(G.playerHurt / 4) & 1;
       } else if (G.playerActionTimer > 0 && G.playerAction) {
         action = G.playerAction;
-        const cols = Assets.manifest[
-          action === 'sling' ? 'davidSling' : action === 'staff' ? 'davidStaff' : 'davidHarp'
-        ].cols.length;
+        const cols = Assets.davidCols(action);
         const max = Math.max(1, G.playerActionMax);
         frame = Math.min(cols - 1, Math.floor((1 - G.playerActionTimer / max) * cols));
+      } else if (G.player.moving) {
+        action = G.player.running ? 'run' : 'walk';
+        frame = G.player.frame;
+      } else {
+        action = 'idle';
+        frame = G.idleFrame;
       }
       if (!Assets.drawDavid(ctx, px, py, G.player.facing, frame, action))
         Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame & 1);
@@ -673,6 +724,10 @@
   /* ---------------- 主循环 ---------------- */
   function loop() {
     if (G.running) {
+      if (G.playerDownTimer > 0) {
+        G.playerDownTimer--;
+        if (G.playerDownTimer === 0) playerDownResolve();
+      }
       if (!G.busy && !UI.dialogueActive() && !UI.questLogOpen()) {
         updatePlayer();
         updateCombat();
@@ -717,6 +772,12 @@
     if (k === '3') { setWeapon('harp'); return; }
     if (k === 'k' || k === 'K') { cycleWeapon(); return; }
 
+    // 祈祷
+    if (k === 'p' || k === 'P') { startPray(); return; }
+
+    // 奔跑（按住 Shift）
+    if (k === 'Shift') { G.keys['run'] = true; return; }
+
     // 任务日志
     if (k === 'q' || k === 'Q') {
       if (G.running && !UI.dialogueActive()) UI.toggleQuestLog(questList());
@@ -730,6 +791,7 @@
   window.addEventListener('keyup', (e) => {
     const k = e.key;
     if (ATTACK_KEYS.includes(k) || k === 'Enter') G.keys['attack'] = false;
+    if (k === 'Shift') G.keys['run'] = false;
     const m = KEYMAP[k];
     if (m) G.keys[m] = false;
   });

@@ -19,35 +19,73 @@ const Assets = (() => {
     },
     david: {
       src: 'assets/david.png',
-      cell: 64,
+      cell: 96,
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
       cols: [0, 1, 2, 3, 4, 5],
     },
+    davidRun: {
+      src: 'assets/david_run.png',
+      cell: 96,
+      dirRow: { down: 0, left: 1, right: 2, up: 3 },
+      cols: [0, 1, 2, 3, 4, 5],
+    },
+    davidIdle: {
+      src: 'assets/david_idle.png',
+      cell: 96,
+      dirRow: { down: 0, left: 1, right: 2, up: 3 },
+      cols: [0, 1, 2, 3],
+    },
     davidSling: {
       src: 'assets/david_sling.png',
-      cell: 64,
+      cell: 96,
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
       cols: [0, 1, 2, 3, 4, 5],
     },
     davidStaff: {
       src: 'assets/david_staff.png',
-      cell: 64,
+      cell: 96,
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
       cols: [0, 1, 2, 3, 4, 5],
     },
     davidHarp: {
       src: 'assets/david_harp.png',
-      cell: 64,
+      cell: 96,
+      dirRow: { down: 0, left: 1, right: 2, up: 3 },
+      cols: [0, 1, 2, 3],
+    },
+    davidPray: {
+      src: 'assets/david_pray.png',
+      cell: 96,
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
       cols: [0, 1, 2, 3],
     },
     davidHurt: {
       src: 'assets/david_hurt.png',
-      cell: 64,
+      cell: 96,
       dirRow: { down: 0, left: 1, right: 2, up: 3 },
       cols: [0, 1],
     },
+    davidDown: {
+      src: 'assets/david_down.png',
+      cell: 96,
+      dirRow: { down: 0, left: 1, right: 2, up: 3 },
+      cols: [0, 1, 2, 3],
+    },
   };
+
+  // 动作 -> 清单条目名（缺图自动回退到 walk/程序化）
+  const DAVID_ACTION = {
+    walk: 'david', run: 'davidRun', idle: 'davidIdle', sling: 'davidSling',
+    staff: 'davidStaff', harp: 'davidHarp', pray: 'davidPray',
+    hurt: 'davidHurt', down: 'davidDown',
+  };
+
+  // 某动作的帧数（缺图回退到行走帧数），供 game.js 计算动画进度
+  function davidCols(action) {
+    const name = DAVID_ACTION[action] || 'david';
+    const d = manifest[has(name) ? name : 'david'];
+    return d && d.cols && d.cols.length ? d.cols.length : 1;
+  }
 
   function load(onComplete) {
     const entries = Object.keys(manifest).filter(k => manifest[k] && manifest[k].src);
@@ -91,12 +129,10 @@ const Assets = (() => {
   }
 
   function drawDavid(ctx, x, y, facing, frame, action = 'walk') {
-    if (action === 'hurt' && drawSheet(ctx, 'davidHurt', x, y, facing, frame)) return true;
-    if (action === 'sling' && drawSheet(ctx, 'davidSling', x, y, facing, frame)) return true;
-    if (action === 'staff' && drawSheet(ctx, 'davidStaff', x, y, facing, frame)) return true;
-    if (action === 'harp' && drawSheet(ctx, 'davidHarp', x, y, facing, frame)) return true;
+    const name = DAVID_ACTION[action];
+    if (name && name !== 'david' && drawSheet(ctx, name, x, y, facing, frame)) return true;
     return drawSheet(ctx, 'david', x, y, facing, frame);
   }
 
-  return { manifest, load, has, drawTile, drawDavid, ready: () => allDone };
+  return { manifest, load, has, drawTile, drawDavid, davidCols, ready: () => allDone };
 })();
