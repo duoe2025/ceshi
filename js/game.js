@@ -19,7 +19,7 @@
     running: false,
     phase: 'intro',          // intro / q1 / q1done / q2 / q3 / done
     player: { x: 0, y: 0, facing: 'down', hp: 20, maxHp: 20, atk: 5,
-              moving: false, animTimer: 0, frame: 0 },
+              moving: false, running: false, animTimer: 0, frame: 0 },
     keys: {},
     lostSheep: [],
     sheepCollected: 0,
@@ -38,6 +38,12 @@
     hintShown: false,        // 是否已提示“物理打不动邪灵”
     shake: 0,                // 屏幕震动帧
     playerHurt: 0,           // 玩家受击闪烁帧
+    playerAction: '',        // sling / staff / harp / pray
+    playerActionTimer: 0,
+    playerActionMax: 0,
+    playerDownTimer: 0,      // 战败倒地动画帧
+    playerDownMax: 0,
+    idleTimer: 0, idleFrame: 0,   // 站立微动作
   };
 
   const SPEED = 2.4;
@@ -73,6 +79,13 @@
     G.hintShown = false;
     G.shake = 0;
     G.playerHurt = 0;
+    G.playerAction = '';
+    G.playerActionTimer = 0;
+    G.playerActionMax = 0;
+    G.playerDownTimer = 0;
+    G.playerDownMax = 0;
+    G.idleTimer = 0; G.idleFrame = 0;
+    G.player.running = false;
     G.keys = {};
     UI.setHp(G.player.hp, G.player.maxHp);
     updateObjective();
@@ -130,6 +143,10 @@
     if (G.keys['down']) dy += 1;
 
     G.player.moving = (dx !== 0 || dy !== 0);
+    G.player.running = G.player.moving && !!G.keys['run'];
+    if (G.player.moving && G.playerAction === 'pray') {
+      G.playerAction = ''; G.playerActionTimer = 0;
+    }
     if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
 
     if (dx < 0) G.player.facing = 'left';
@@ -137,17 +154,32 @@
     else if (dy < 0) G.player.facing = 'up';
     else if (dy > 0) G.player.facing = 'down';
 
-    // 分轴移动，可贴墙滑动
-    const nx = G.player.x + dx * SPEED;
+    // 分轴移动，可贴墙滑动；按住 Shift 奔跑加速
+    const spd = G.player.running ? SPEED * 1.6 : SPEED;
+    const nx = G.player.x + dx * spd;
     if (!blocked(nx, G.player.y)) G.player.x = nx;
-    const ny = G.player.y + dy * SPEED;
+    const ny = G.player.y + dy * spd;
     if (!blocked(G.player.x, ny)) G.player.y = ny;
 
-    // 行走动画
+    // 行走/奔跑动画；站立时走 idle 微动作（缺图都会回退）
     if (G.player.moving) {
+      G.idleTimer = 0; G.idleFrame = 0;
       G.player.animTimer++;
-      if (G.player.animTimer > 8) { G.player.frame ^= 1; G.player.animTimer = 0; }
-    } else { G.player.frame = 0; }
+      const step = G.player.running ? 4 : 6;
+      if (G.player.animTimer > step) {
+        const wf = Assets.davidCols(G.player.running ? 'run' : 'walk');
+        G.player.frame = (G.player.frame + 1) % wf;
+        G.player.animTimer = 0;
+      }
+    } else {
+      G.player.frame = 0;
+      G.idleTimer++;
+      if (G.idleTimer > 12) {
+        const idf = Assets.davidCols('idle');
+        G.idleFrame = (G.idleFrame + 1) % idf;
+        G.idleTimer = 0;
+      }
+    }
 
     checkSheepPickup();
   }
@@ -243,11 +275,25 @@
     setWeapon(order[(i + 1) % order.length]);
   }
 
+  // 祈祷 emote（闭目双手合十）：非战斗状态下按 P 触发
+  function startPray() {
+    if (!G.running || G.busy || G.enemy) return;
+    if (UI.dialogueActive() || UI.questLogOpen()) return;
+    if (G.playerDownTimer > 0 || G.playerHurt > 0) return;
+    G.playerAction = 'pray';
+    G.playerActionMax = 60;
+    G.playerActionTimer = 60;
+    UI.toast('大卫闭目祈祷……', 1000);
+  }
+
   function tryAttack() {
     if (!G.enemy || G.busy) return;
     if (G.attackCD > 0) return;
     const wpn = GameData.weapons[G.weapon];
     G.attackCD = wpn.cd;
+    G.playerAction = G.weapon;
+    G.playerActionMax = G.weapon === 'harp' ? 24 : 12;
+    G.playerActionTimer = G.playerActionMax;
     const pc = playerCenter();
     const dir = facingVec(G.player.facing);
 
@@ -302,6 +348,7 @@
     G.player.hp = Math.max(0, G.player.hp - dmg);
     UI.setHp(G.player.hp, G.player.maxHp);
     G.shake = 6; G.playerHurt = 12;
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
     if (G.player.hp <= 0) playerDown();
   }
 
@@ -334,9 +381,17 @@
     }
   }
 
+  // 被击倒：先播放倒地动画，再进入复活/退守流程
   function playerDown() {
     G.busy = true;
     G.projectiles = []; G.effects = [];
+    G.playerHurt = 0;
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
+    G.playerDownMax = 78;
+    G.playerDownTimer = 78;
+  }
+
+  function playerDownResolve() {
     G.player.hp = G.player.maxHp;
     UI.setHp(G.player.hp, G.player.maxHp);
     const e = G.enemy;
@@ -346,6 +401,7 @@
       e.hp = e.maxHp; e.atk = def.atk; e.x = pos.c * TILE; e.y = pos.r * TILE;
       e.touchCD = 0; e.dead = false; e.greeted = true; e.hurt = 0;
     }
+    G.playerAction = ''; G.playerActionTimer = 0; G.playerActionMax = 0;
     let line;
     if (G.phase === 'q3') {
       G.player.x = 9 * TILE; G.player.y = 23 * TILE; G.player.facing = 'up';
@@ -425,6 +481,8 @@
     updateEffects();
     if (G.shake > 0) G.shake--;
     if (G.playerHurt > 0) G.playerHurt--;
+    if (G.playerActionTimer > 0) G.playerActionTimer--;
+    else G.playerAction = '';
   }
 
   function finishChapter() {
@@ -459,7 +517,9 @@
     const r1 = Math.min(MAP_ROWS - 1, r0 + Math.ceil(VIEW_H / TILE) + 1);
     for (let r = Math.max(0, r0); r <= r1; r++) {
       for (let c = Math.max(0, c0); c <= c1; c++) {
-        Sprites.tile(ctx, map[r][c], c * TILE - camX, r * TILE - camY);
+        const sx = c * TILE - camX, sy = r * TILE - camY;
+        // 有图集就用图片，缺图片回退到程序化绘制
+        if (!Assets.drawTile(ctx, map[r][c], sx, sy)) Sprites.tile(ctx, map[r][c], sx, sy);
       }
     }
 
@@ -507,7 +567,33 @@
 
     // 大卫
     if (G.playerHurt > 0 && Math.floor(G.playerHurt / 3) % 2 === 0) ctx.globalAlpha = 0.45;
-    Sprites.david(ctx, G.player.x - camX, G.player.y - camY, 2, G.player.facing, G.player.frame);
+    {
+      const px = G.player.x - camX, py = G.player.y - camY;
+      let action = 'walk', frame = G.player.frame;
+      if (G.playerDownTimer > 0) {
+        // 被击倒：倒地动画，最后一帧停在地上
+        action = 'down';
+        const cols = Assets.davidCols('down');
+        const prog = 1 - G.playerDownTimer / Math.max(1, G.playerDownMax);
+        frame = Math.min(cols - 1, Math.floor(prog * cols));
+      } else if (G.playerHurt > 0) {
+        action = 'hurt';
+        frame = Math.floor(G.playerHurt / 4) & 1;
+      } else if (G.playerActionTimer > 0 && G.playerAction) {
+        action = G.playerAction;
+        const cols = Assets.davidCols(action);
+        const max = Math.max(1, G.playerActionMax);
+        frame = Math.min(cols - 1, Math.floor((1 - G.playerActionTimer / max) * cols));
+      } else if (G.player.moving) {
+        action = G.player.running ? 'run' : 'walk';
+        frame = G.player.frame;
+      } else {
+        action = 'idle';
+        frame = G.idleFrame;
+      }
+      if (!Assets.drawDavid(ctx, px, py, G.player.facing, frame, action))
+        Sprites.david(ctx, px, py, 2, G.player.facing, G.player.frame & 1);
+    }
     ctx.globalAlpha = 1;
 
     // 夜幕（任务三期间）
@@ -638,6 +724,10 @@
   /* ---------------- 主循环 ---------------- */
   function loop() {
     if (G.running) {
+      if (G.playerDownTimer > 0) {
+        G.playerDownTimer--;
+        if (G.playerDownTimer === 0) playerDownResolve();
+      }
       if (!G.busy && !UI.dialogueActive() && !UI.questLogOpen()) {
         updatePlayer();
         updateCombat();
@@ -682,6 +772,12 @@
     if (k === '3') { setWeapon('harp'); return; }
     if (k === 'k' || k === 'K') { cycleWeapon(); return; }
 
+    // 祈祷
+    if (k === 'p' || k === 'P') { startPray(); return; }
+
+    // 奔跑（按住 Shift）
+    if (k === 'Shift') { G.keys['run'] = true; return; }
+
     // 任务日志
     if (k === 'q' || k === 'Q') {
       if (G.running && !UI.dialogueActive()) UI.toggleQuestLog(questList());
@@ -695,6 +791,7 @@
   window.addEventListener('keyup', (e) => {
     const k = e.key;
     if (ATTACK_KEYS.includes(k) || k === 'Enter') G.keys['attack'] = false;
+    if (k === 'Shift') G.keys['run'] = false;
     const m = KEYMAP[k];
     if (m) G.keys[m] = false;
   });
@@ -716,5 +813,6 @@
   document.getElementById('restart-btn').addEventListener('click', startGame);
 
   UI.initDialogue();
+  Assets.load();            // 异步加载图片素材；缺图片时自动回退到程序化绘制
   requestAnimationFrame(loop);
 })();
